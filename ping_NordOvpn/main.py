@@ -42,6 +42,7 @@ def get_ip_from_ovpn(path):
     for line in fr.readlines():
         if IP_MARK in line:
             items = line.replace("\n", "").split(' ')
+            fr.close()
             return items[POS_IP].replace("\n", "").strip()
     fr.close()
 
@@ -77,8 +78,9 @@ class ParseOvpn(Thread):
                 s_info = self.q_ovpn.get(True, timeout=0.3)
                 assert(isinstance(s_info, ServerInfo))
                 ip_str = get_ip_from_ovpn(s_info.path)
-                s_info.ip = ip_str
-                self.q_server.put(s_info)
+                if ip_str is not None:
+                    s_info.ip = ip_str
+                    self.q_server.put(s_info)
             except queue.Empty:
                 break
         shutil.rmtree(OVPN_TMP_FORDER)
@@ -127,8 +129,7 @@ class PingServer(Thread):
                 print('{}/{}: {}'.format(num, self.total_num, str(s_info)))
                 self.delay_list.append((s_info.delay, s_info.name, s_info.ip, s_info.path))
             except queue.Empty:
-                if self.get_processed_num() == self.total_num:
-                    return
+                return
 
     def run(self):
         thread_num = 200
@@ -181,5 +182,6 @@ if __name__ == '__main__':
     print('================================')
     delay_list.sort()
     IgnoreSet.set(delay_list)
-    for x in delay_list[0:10]:
-        print(x)
+    for x in delay_list:
+        if x[0] < 200:
+            print(x)
