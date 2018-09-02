@@ -180,8 +180,7 @@ if __name__ == '__main__':
     th = PingServer(q_server_info, delay_list, IgnoreSet().get())
     th.join()
     print('================================')
-    delay_list.sort()
+    delay_list.sort(reverse=True)
     IgnoreSet.set(delay_list)
-    for x in delay_list:
-        if x[0] < 200:
-            print(x)
+    for x in delay_list[-15:]:
+        print(x)
