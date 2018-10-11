@@ -5,9 +5,9 @@ import subprocess
 
 def cus_ping(host):
     if system_name().lower() == "windows":
-        p = subprocess.Popen(["ping", "-n", "48", host], stdout=subprocess.PIPE)
+        p = subprocess.Popen(["ping", "-n", "24", host], stdout=subprocess.PIPE)
     else:
-        p = subprocess.Popen(["ping", "-c", "48", host], stdout=subprocess.PIPE)
+        p = subprocess.Popen(["ping", "-c", "24", host], stdout=subprocess.PIPE)
     p_bytes = str(p.communicate()[0])
     delay_list = list(str(p_bytes).split('ms'))
     if len(delay_list) > 1:
@@ -15,7 +15,7 @@ def cus_ping(host):
             delay = delay_list[-2].split('= ')[-1]
         else:
             if '/' in delay_list[-2]:
-                delay = delay_list[-2].split('/')[-1]
+                delay = delay_list[-2].split('/')[-3]
             else:
                 delay = '8799'
     else:

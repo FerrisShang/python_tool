@@ -5,15 +5,24 @@ from threading import Thread, Lock
 from cus_ping import *
 from zipfile import ZipFile
 from struct import pack, unpack
+from platform import system as system_name
 
-OVPN_ZIP_PATH = 'D:\\Download'
-OVPN_TMP_FORDER = OVPN_ZIP_PATH + '\\.nord.tmp'
+if system_name().lower() == "windows":
+    OVPN_ZIP_PATH = 'D:\\Download'
+    OVPN_TMP_FORDER = OVPN_ZIP_PATH + '\\.nord.tmp'
+    OVPN_OVPN_NAME = '\\ovpn.zip'
+    OVPN_IGNORE_FILE_PATH = '\\.OVPN_Ignore.list'
+else:
+    OVPN_ZIP_PATH = '/home/user/Downloads'
+    OVPN_TMP_FORDER = OVPN_ZIP_PATH + '/.nord.tmp'
+    OVPN_OVPN_NAME = '/ovpn.zip'
+    OVPN_IGNORE_FILE_PATH = '/.OVPN_Ignore.list'
 
 
 def unzip_ovpn_zip(zip_path, tmp_folder, q_filelist = None):
     if not q_filelist:
         assert(isinstance(q_filelist, queue.Queue))
-    with ZipFile(zip_path + '\\ovpn.zip', 'r') as zf:
+    with ZipFile(zip_path + OVPN_OVPN_NAME, 'r') as zf:
         file_list = []
         for file in zf.namelist():
             if '.tcp.ovpn' in file:
@@ -24,14 +33,14 @@ def unzip_ovpn_zip(zip_path, tmp_folder, q_filelist = None):
             for i in range(10):
                 zf.extract(file_list[i], tmp_folder)
                 if q_filelist:
-                    q_filelist.put(ServerInfo(tmp_folder + '\\' + file_list[i]))
+                    q_filelist.put(ServerInfo(tmp_folder + ('\\' if system_name().lower() == "windows" else '/') + file_list[i]))
         else:
             if q_filelist:
                 q_filelist.put(len(file_list))
             for file in file_list:
                 zf.extract(file, tmp_folder)
                 if q_filelist:
-                    q_filelist.put(ServerInfo(tmp_folder + '\\' + file))
+                    q_filelist.put(ServerInfo(tmp_folder + ('\\' if system_name().lower() == "windows" else '/') + file))
         zf.close()
 
 
@@ -144,7 +153,7 @@ class PingServer(Thread):
 
 
 class IgnoreSet:
-    OVPN_IGNORE_FILE = OVPN_ZIP_PATH + '\\.OVPN_Ignore.list'
+    OVPN_IGNORE_FILE = OVPN_ZIP_PATH + OVPN_IGNORE_FILE_PATH
 
     @staticmethod
     def get():

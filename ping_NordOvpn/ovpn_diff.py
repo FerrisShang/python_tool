@@ -1,10 +1,17 @@
+from platform import system as system_name
 from zipfile import ZipFile
 import requests
 import os
 
-OVPN_ZIP_PATH = 'D:\\Download'
-OVPN1_NAME = '\\ovpn.zip'
-OVPN2_NAME = '\\ovpn (1).zip'
+if system_name().lower() == "windows":
+    OVPN_ZIP_PATH = 'D:\\Download'
+    OVPN1_NAME = '\\ovpn.zip'
+    OVPN2_NAME = '\\ovpn (1).zip'
+else:
+    OVPN_ZIP_PATH = '/home/user/Downloads'
+    OVPN1_NAME = '/ovpn.zip'
+    OVPN2_NAME = '/ovpn (1).zip'
+
 OVPN_ZIP_URL = 'https://downloads.nordcdn.com/configs/archives/servers/ovpn.zip'
 
 if __name__ == '__main__':
