@@ -2,9 +2,9 @@
 import usb
 import threading
 import queue
-
-from struct import pack
+import os
 import time
+from struct import pack
 
 
 __all__ = [
@@ -44,6 +44,7 @@ class BtUsb:
         self.__param__ = param
         self.__dev__ = usb.core.find(idVendor=id_vendor, idProduct=id_product)
         if self.__dev__ is None:
+            print('Device not found!')
             return
         assert(callback is not None)
         assert(isinstance(self.__dev__, usb.core.Device))
@@ -91,7 +92,7 @@ class BtUsb:
             if self.rec_log:
                 self.__btsnoop__.record(msg.data, BtSnoop.SEND if msg.type <= BtUsb.Msg.TYPE_SEND_ACL else BtSnoop.RECV)
             if self.dump_log:
-                print(('<<< ' if msg.type <= BtUsb.Msg.TYPE_SEND_ACL else '>>> ') + ''.join('{:02X} '.format(x) for x in msg.data));
+                print(('<<< ' if msg.type <= BtUsb.Msg.TYPE_SEND_ACL else '>>> ') + ''.join('{:02X} '.format(x) for x in msg.data))
 
     def send(self, data):
         if data[0] == 0x01:
@@ -102,16 +103,17 @@ class BtUsb:
     def __recv_evt__(self):
         while True:
             try:
-                pkt = self.__dev__.read(self.__INT_R_ENDP__, 4096, timeout=4096)
+                pkt = self.__dev__.read(self.__INT_R_ENDP__, 4096, timeout=-1)
                 if pkt != '':
                     self.__send_recv_queue__.put(BtUsb.Msg(BtUsb.Msg.TYPE_EVT, b'\x04' + pkt))
-            except usb.core.USBError:
-                pass
+            except usb.core.USBError as e:
+                print('USB device error: {}'.format(str(e)))
+                os._exit(0)
 
     def __recv_acl__(self):
         while True:
             try:
-                pkt = self.__dev__.read(self.__ACL_R_ENDP__, 4096, timeout=4096)
+                pkt = self.__dev__.read(self.__ACL_R_ENDP__, 4096, timeout=-1)
                 if pkt != '':
                     self.__send_recv_queue__.put(BtUsb.Msg(BtUsb.Msg.TYPE_RECV_ACL, b'\x02' + pkt))
             except usb.core.USBError:
@@ -121,8 +123,6 @@ class BtUsb:
 def __recv_cb__(msg, param):
     print(msg)
 
-import time
 if __name__ == '__main__':
     bt_usb = BtUsb(__recv_cb__, dump_log=True)
-    time.sleep(1)
     bt_usb.send(b'\x01\x03\x0c\x00')
