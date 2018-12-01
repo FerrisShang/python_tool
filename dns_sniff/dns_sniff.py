@@ -53,11 +53,11 @@ def unzip_packet(zip_name, folder_name):
                     del_folder_name = str(file).split('/')[0]
         try:
             shutil.move(del_folder_name+'/'+folder_name+'/', './')
-        except shutil.Error:
+        except:
             pass
         try:
             shutil.rmtree(del_folder_name)
-        except FileNotFoundError:
+        except:
             pass
 
 unzip_packet(DNSPY_FILENAME, 'dns')
@@ -128,7 +128,7 @@ class DomainRec:
 def save_rec_to_file(record, file_name):
     try:
         shutil.move(file_name, file_name+'.bk')
-    except shutil.Error:
+    except:
         pass
     with open(file_name, 'w', encoding='utf-8') as f:
         vv = [v for k, v in record.items()]

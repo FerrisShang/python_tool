@@ -174,7 +174,7 @@ class IgnoreSet:
         f = open(IgnoreSet.OVPN_IGNORE_FILE, 'wb')
         for delay, name, ip, path in delay_list:
             assert(isinstance(ip, str))
-            if delay > 2000:
+            if delay > 500:
                 ip = [int(n) for n in ip.split('.')]
                 f.write(pack('BBBB', ip[0], ip[1], ip[2], ip[3]))
         f.close()
