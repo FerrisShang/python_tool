@@ -1,6 +1,7 @@
 import os
 import shutil
 import requests
+import re
 from queue import Queue, Empty
 
 CODE_PATH = '../ping_NordOvpn/'
@@ -46,6 +47,7 @@ from zipfile import ZipFile
 
 def unzip_packet(zip_name, folder_name):
     if not os.path.exists('./' + folder_name):
+        del_folder_name = None
         with ZipFile(zip_name, 'r') as zf:
             for file in zf.namelist():
                 if '/'+folder_name+'/' in file:
@@ -99,13 +101,12 @@ def dns_record_cb(pkt):
     except Exception as err:
         print(err)
 
-
-def dns_sniff(interface):
+def dns_sniff(interface, callback):
     while True:
         if interface in os.listdir('/sys/class/net/'):
             try:
                 filter_bpf = 'udp and port 53'
-                sniff(filter=filter_bpf, store=0,  prn=dns_record_cb, iface=interface)
+                sniff(filter=filter_bpf, store=0,  prn=callback, iface=interface)
             except OSError or RuntimeError as err:
                 print(err)
         else:
@@ -138,7 +139,16 @@ def save_rec_to_file(record, file_name):
         f.close()
         print('file {} recorded.'.format(file_name))
 
-def callback(name_queue, file_name, name_rec=None):
+def is_fullmatch_in_list(pattern_list, string):
+    for pattern in pattern_list:
+        try:
+            if re.fullmatch(pattern, string) is not None:
+                return True
+        except:
+            pass
+    return False
+
+def callback(name_queue, file_name, name_rec=None, ign_list=None):
     assert(isinstance(name_queue, Queue))
     record_timer_cnt = 0
     name_rec = {} if name_rec is None else name_rec
@@ -146,12 +156,13 @@ def callback(name_queue, file_name, name_rec=None):
     while True:
         try:
             name = name_queue.get(timeout=20)
-            if name not in name_rec:
-                name_rec[name] = DomainRec(name)
-            else:
-                name_rec[name].update()
-            record_flag = True
-            print('{:5} | {} | {}'.format(name_rec[name].visit_count, name_rec[name].visit_time, name))
+            if ign_list is None or not is_fullmatch_in_list(ign_list, name):
+                if name not in name_rec:
+                    name_rec[name] = DomainRec(name)
+                else:
+                    name_rec[name].update()
+                record_flag = True
+                print('{:5} | {} | {}'.format(name_rec[name].visit_count, name_rec[name].visit_time, name))
         except Empty:
             pass
         record_timer_cnt += 1
@@ -161,17 +172,24 @@ def callback(name_queue, file_name, name_rec=None):
                 save_rec_to_file(name_rec, file_name)
                 record_flag = False
 
-q = Queue()
-DNS_CACHE_FILE_NAME = 'dns_query_rec.txt'
-name_record = {}
-if os.path.exists(DNS_CACHE_FILE_NAME):
-    with open(DNS_CACHE_FILE_NAME, 'r') as f_dns:
-        for line in f_dns.readlines():
-            c, t, n = [s.strip() for s in line.split('|')]
-            print('Load {}  {}  {}'.format(c, t, n))
-            name_record[n] = DomainRec(n, c, t)
-        f_dns.close()
-Thread(target=callback, args=[q, DNS_CACHE_FILE_NAME, name_record]).start()
-Thread(target=dns_sniff, args=['tun0']).start()
-Thread(target=dns_sniff, args=['wlp5s0']).start()
-Thread(target=dns_sniff, args=['wlp4s0']).start()
+if __name__ == '__main__':
+    q = Queue()
+    DNS_CACHE_FILE_NAME = 'dns_query_rec.txt'
+    IGN_FILE_NAME = 'ign_domain.list'
+    name_record = {}
+    ign_list = []
+    if os.path.exists(DNS_CACHE_FILE_NAME):
+        with open(DNS_CACHE_FILE_NAME, 'r') as f_dns:
+            for line in f_dns.readlines():
+                c, t, n = [s.strip() for s in line.split('|')]
+                print('Load {}  {}  {}'.format(c, t, n))
+                name_record[n] = DomainRec(n, c, t)
+            f_dns.close()
+    if os.path.exists(IGN_FILE_NAME):
+        with open(IGN_FILE_NAME, 'r') as f_ign:
+            ign_list = [s.strip() for s in f_ign.readlines()]
+            f_ign.close()
+    Thread(target=callback, args=[q, DNS_CACHE_FILE_NAME, name_record, ign_list]).start()
+    Thread(target=dns_sniff, args=['tun0', dns_record_cb]).start()
+    Thread(target=dns_sniff, args=['wlp5s0', dns_record_cb]).start()
+    Thread(target=dns_sniff, args=['wlp4s0', dns_record_cb]).start()

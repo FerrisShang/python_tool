@@ -1,4 +1,5 @@
 import os
+import re
 import time
 import subprocess
 import dns.resolver
@@ -21,6 +22,16 @@ def cus_ping(host):
         delay = '8799'
     lost = list(str(p_bytes).split('%')[0].split(' '))[-1]
     return int(int(lost)/100*1200 + int(float(delay)))
+
+
+def is_fullmatch_in_list(pattern_list, string):
+    for pattern in pattern_list:
+        try:
+            if re.fullmatch(pattern, string) is not None:
+                return True
+        except:
+            pass
+    return False
 
 
 class DnsGet:
@@ -119,27 +130,33 @@ def ping_ip_cb(q, ip):
     q.put((cus_ping(ip), ip))
 
 
-def find_best_ip(hosts, domain, idx, total):
+def find_best_ip(hosts, domain, blk_list, idx, total):
     assert(isinstance(hosts, HostRecord))
     assert(isinstance(domain, DomainRec))
-    ip = hosts.get_ip_by_name(domain.name)
-    if ip == '127.0.0.1' or (ip is not None and cus_ping(ip) < 1500):
-        print('({}/{}: {}  {}'.format(idx.count(), total, domain.name, ip))
-        return
-    ips = DnsGet.ip_get(domain.name)
-    q = PriorityQueue()
-    with ThreadPoolExecutor(10) as exec:
-        for ip in ips:
-            exec.submit(ping_ip_cb, q, str(ip))
-    try:
-        item = q.get(block=False)
-        if item[0] < 1500:
-            hosts.add(domain.name, item[1])
-            print('({}/{}: {}  {} ({})'.format(idx.count(), total, domain.name, item[1], item[0]))
+    if not is_fullmatch_in_list(blk_list, domain.name):
+        ip = hosts.get_ip_by_name(domain.name)
+        if ip == '127.0.0.1' or (ip is not None and cus_ping(ip) < 1500):
+            print('({}/{}: {}  {}'.format(idx.count(), total, domain.name, ip))
             return
-    except Empty:
-        pass
-    hosts.add(domain.name, '127.0.0.1')
+        ips = DnsGet.ip_get(domain.name)
+        q = PriorityQueue()
+        with ThreadPoolExecutor(10) as exec:
+            for ip in ips:
+                exec.submit(ping_ip_cb, q, str(ip))
+        try:
+            item = q.get(block=False)
+            if item[0] < 1500:
+                hosts.add(domain.name, item[1])
+                print('({}/{}: {}  {} ({})'.format(idx.count(), total, domain.name, item[1], item[0]))
+                return
+        except Empty:
+            pass
+    else:
+        hosts.add(domain.name, '127.0.0.1')
+        print('({}/{}: {}  (In Black List)'.format(idx.count(), total, domain.name))
+        return
+    if hosts.get_ip_by_name(domain.name) is None:
+        hosts.add(domain.name, '127.0.0.1')
     print('({}/{}: {}  No available in {} IPs'.format(idx.count(), total, domain.name, len(ips)))
 
 
@@ -157,13 +174,19 @@ class ThreadIdx:
 
 
 DNS_CACHE_FILE_NAME = 'dns_query_rec.txt'
+BLK_FILE_NAME = 'blk_domain.list'
 HOST_FILE_NAME = '/etc/hosts'
+blk_list = []
 domain_record = get_domain_record_from_file(DNS_CACHE_FILE_NAME)
 hosts_record = HostRecord(HOST_FILE_NAME)
+if os.path.exists(BLK_FILE_NAME):
+    with open(BLK_FILE_NAME, 'r') as f:
+        blk_list = [s.strip() for s in f.readlines()]
+        f.close()
 with ThreadPoolExecutor(50) as executor:
     thead_idx = ThreadIdx()
     for i in range(len(domain_record)):
-        executor.submit(find_best_ip, hosts_record, domain_record[i], thead_idx, len(domain_record))
+        executor.submit(find_best_ip, hosts_record, domain_record[i], blk_list, thead_idx, len(domain_record))
 
 with open('hosts', 'w') as f:
     for k, v in hosts_record.items():

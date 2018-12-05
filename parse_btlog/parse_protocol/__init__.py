@@ -140,7 +140,7 @@ class ProtoParse:
                     param[self.PARAM_IDX_KEY], param[self.PARAM_IDX_VALUE_RANGE], param[self.PARAM_IDX_DESCRIPTION])
             else:
                 print('Data parameter parse error: line{} in <{}> <{}>'.
-                      format(i+1, sheet_format_name, repr(param[self.PARAM_IDX_NAME])))
+                      format(i+1, sheet_param_name, repr(param[self.PARAM_IDX_NAME])))
         self.check()
 
     def check(self):
@@ -310,7 +310,10 @@ class UnpackStream:
             except ValueError:
                 data_str = ''.join('{:02X} '.format(x) for x in param.p_value) + ' (Unknown)'
 
-        title_str = param.p_class.__name__.replace('_', ' ')
+        if param.p_class.__data_type__ != 'enum' and hasattr(param.p_class, '__description__'):
+            title_str = eval(param.p_class.__name__+'.__description__')
+        else:
+            title_str = param.p_class.__name__.replace('_', ' ')
         return ' ' * 4 + '{:30s}: {}'.format(title_str, data_str)
 
     def __init__(self, stream):
@@ -356,7 +359,7 @@ class UnpackStream:
                     elif p_class.__bit_width__ == 0:
                         p_len = len(stream[len_cnt:])
                     else:
-                        p_len = len(stream[len_cnt:-p_class.__bit_width__//8])
+                        p_len = len(stream[len_cnt:p_class.__bit_width__//8])
 
                     if len_cnt + p_len > len(stream):
                         item = self.Item(p_class, stream[len_cnt:], None, False)
@@ -371,12 +374,15 @@ class UnpackStream:
             for item in param:
                 if item.p_sub is not None:
                     try:
-                        sub_key = None
-                        for find_k in param:
-                            if find_k.p_class.__name__ == item.p_class.__sub_key__:
-                                sub_key = int.from_bytes(find_k.p_value, 'little')
-                                sub_key = find_k.p_class(sub_key)
-                                break
+                        if item.p_class.__sub_key__ == 'DEFAULT':
+                            sub_key = eval('DEFAULT.KEY')
+                        else:
+                            sub_key = None
+                            for find_k in param:
+                                if find_k.p_class.__name__ == item.p_class.__sub_key__:
+                                    sub_key = int.from_bytes(find_k.p_value, 'little')
+                                    sub_key = find_k.p_class(sub_key)
+                                    break
                         item.success = self.unpack(item.p_value, eval('fmt_' + item.p_class.__name__), sub_key, item.p_sub)
                     except ValueError:
                         item.success = False
