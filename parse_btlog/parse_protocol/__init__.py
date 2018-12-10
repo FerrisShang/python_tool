@@ -2,7 +2,6 @@ import xlrd
 from re import fullmatch
 from collections import OrderedDict
 from struct import pack, unpack
-from os import _exit
 from enum import Enum
 
 
@@ -64,7 +63,7 @@ class ParameterRec:
         self.cfg_flag = cfg_flag
         self.description = description
         self.info = Info(sheet_suffix, sheet_name, line)
-        if self.type == BasicType.enum.name:
+        if self.type == BasicType.enum.name or self.type == BasicType.bitmap.name:
             self.key_value = OrderedDict()
 
     def enum_add(self, key, value, description):
@@ -78,7 +77,7 @@ class ParameterRec:
 
     def __str__(self):
         string = '{:32s}  {:16s}  {:16s}  {}'.format(self.name, self.width, self.type, self.sub_key)
-        if self.type == BasicType.enum.name:
+        if self.type == BasicType.enum.name or self.type == BasicType.bitmap.name:
             for k, v in self.key_value.items():
                 string += '\n\t\t{:50s}{:10s}{}'.format(k, v.value, v.description)
         return string
@@ -148,7 +147,7 @@ class ParamData:
                 #  parameter define validation
                 chk = [(RegExp.PARAM_NAME, 'name'), (RegExp.PARAM_WIDTH, 'width'), (RegExp.PARAM_TYPE, 'type'),
                        (RegExp.PARAM_DEFAULT, 'default'), (RegExp.PARAM_CFG, 'cfg'), ]
-                if pl[self.idx_type] != BasicType.enum.name:
+                if pl[self.idx_type] != BasicType.enum.name and pl[self.idx_type] != BasicType.bitmap.name:
                     chk += [(RegExp.PARAM_SUB_KEY, 'sub_key'), (RegExp.PARAM_RANGE, 'range')]
                 if not self.__regular_check_param__(chk, pl, sheet_name, i+1+self.RESERVED_LINE):
                     return False
@@ -164,14 +163,18 @@ class ParamData:
                 last_param = self.param_dict[symbol+pl[self.idx_name]] = \
                     ParameterRec(pl[self.idx_name], width_trans, type_trans, sub_key_trans,
                                  pl[self.idx_range], pl[self.idx_default], pl[self.idx_cfg], pl[self.idx_desc], symbol, sheet_name, i+1+self.RESERVED_LINE)
-            if (pl[self.idx_name] != '' and pl[self.idx_type] == BasicType.enum.name) or \
-                    (pl[self.idx_name], pl[self.idx_width], pl[self.idx_type], pl[self.idx_type]) == ('', '', '', ''):  # enum value, key
+            if (pl[self.idx_name] != '' and (pl[self.idx_type] == BasicType.enum.name or pl[self.idx_type] == BasicType.bitmap.name)) or \
+                    (pl[self.idx_name], pl[self.idx_width], pl[self.idx_type]) == ('', '', ''):  # enum value, key
                 #  enum value, key validation
                 chk = [(RegExp.PARAM_KEY, 'key'), (RegExp.PARAM_VALUE, 'value')]
                 if not self.__regular_check_param__(chk, pl, sheet_name, i+1+self.RESERVED_LINE):
                     return False
                 if last_param is None:
                     print("Error: Invalid definition in Sheet '{}', line {}".format(sheet_name, i+1+self.RESERVED_LINE))
+                    return False
+                if int(pl[self.idx_value], 0) in [int(v.value, 0) for k, v in last_param.key_value.items()] or \
+                        pl[self.idx_key] in last_param.key_value:
+                    print("Error: Key value redefinition in Sheet '{}', line {}".format(sheet_name, i+1+self.RESERVED_LINE))
                     return False
                 last_param.enum_add(pl[self.idx_key], pl[self.idx_value], pl[self.idx_desc])
             if not (pl[self.idx_name] != '' or (pl[self.idx_name], pl[self.idx_width], pl[self.idx_type], pl[self.idx_type]) == ('', '', '', '')):
@@ -271,12 +274,12 @@ class ParamData:
                       format(param.name, param.width, param.info.sheet_name, param.info.line))
                 return False
             # sub_key
-            if param.type != BasicType.enum.name and param.sub_key != '' and param.sub_key != '0':
+            if param.type != BasicType.enum.name and param.type != BasicType.bitmap.name and param.sub_key != '' and param.sub_key != '0':
                 if param.sub_key not in self.param_dict:
                     print("Error: Param '{}' sub_key invalid, '{}' is not defined. Sheet '{}', line {}".
                           format(param.name, param.sub_key, param.info.sheet_name, param.info.line))
                     return False
-                elif self.param_dict[param.sub_key].type != BasicType.enum.name:
+                elif self.param_dict[param.sub_key].type != BasicType.enum.name and self.param_dict[param.sub_key].type != BasicType.enum.name:
                     print("Error: Param '{}' sub_key invalid, sub_key param must be the enum type. Sheet '{}', line {}".
                           format(param.name, param.info.sheet_name, param.info.line))
                     return False
@@ -316,27 +319,36 @@ class ParamData:
                         return False
 
         #  Unused check
-        params_in_format = set()
+        params_in_format = {'PROTO_ALL'}
+        formats = set()
         for name, fmt in self.format_dict.items():
             for k, item in fmt.key_value.items():
                 params_in_format |= set([type_desc.split()[0] for type_desc in item.parameters.split('|')])
-        params_in_format |= set([p.type for k, p in self.param_dict.items()])
-        params_in_format |= set([p.sub_key for k, p in self.param_dict.items()] + ['PROTO_ALL'])
+                formats.add(name)
+        params_in_type = set([p.type for k, p in self.param_dict.items()])
+        params_in_sub_key = set([p.sub_key for k, p in self.param_dict.items()])
         params_in_param_name = set([k for k, p in self.param_dict.items()])
-        for unused in params_in_param_name - params_in_format:
+        params_have_sub_key = set()
+        for name, fmt in self.param_dict.items():
+            assert(isinstance(fmt, ParameterRec))
+            if fmt.sub_key != '' and fmt.type != BasicType.enum.name and fmt.type != BasicType.bitmap.name:
+                params_have_sub_key.add(name)
+        for undefined in params_have_sub_key - formats:
+            param = self.param_dict[undefined]
+            print("Error: Format {} undefined. Sheet '{}', line {}".format(param.name, param.info.sheet_name, param.info.line))
+            return False
+        for unused in params_in_param_name - (params_in_format | params_in_type | params_in_sub_key):
             param = self.param_dict[unused]
-            print("Warning: Unused parameter '{}'. Sheet '{}', line {}".format(self.param_dict[unused].name, param.info.sheet_name, param.info.line))
+            print("Warning: Unused parameter '{}'. Sheet '{}', line {}".format(param.name, param.info.sheet_name, param.info.line))
 
         return True
 
     def __get_param_desc_from_string(self, string, sheet_suffix):
         items = [x for x in string.split('|')]
         param_names = [x.split()[0] for x in items]
-        params_list_str = ', '.join(
-            [p if sheet_suffix + p not in self.param_dict else sheet_suffix + p for p in param_names])
-        desc_list_str = ', '.join(
-            [repr(x.split()[1]) if len(x.split()) == 2 else repr('') for x in items])
-        return params_list_str, desc_list_str
+        params_list_str = [p if sheet_suffix + p not in self.param_dict else sheet_suffix + p for p in param_names]
+        desc_list_str = [repr(x.split()[1]) if len(x.split()) == 2 else repr('') for x in items]
+        return ', '.join(["({}, {})".format(p, d) for p, d in zip(params_list_str, desc_list_str)])
 
     def to_code(self):
         if not self.parse_suc:
@@ -351,7 +363,7 @@ class ParamData:
                 param_str_dict[name] = param_str_dict[param.type].replace('class {}'.format(param.type), 'class {}'.format(name))
                 continue
             param_str = ''
-            param_str += 'class {}{}:\n'.format(name, '' if param.type != BasicType.enum.name else '(Enum)')
+            param_str += 'class {}{}:\n'.format(name, '' if (param.type != BasicType.enum.name and param.type != BasicType.bitmap.name) else '(Enum)')
             if fullmatch(RegExp.PARAM_WIDTH_NUM, param.width):
                 param_str += '    __bit_width__ = {}\n'.format(int(param.width))
             elif param.width != '':
@@ -361,7 +373,7 @@ class ParamData:
                 param_str += '    __default__ = {}\n'.format(param.default)
             if len(param.cfg_flag) > 0:
                 param_str += '    __cfg_flag__ = {}\n'.format(param.cfg_flag)
-            if param.type != BasicType.enum.name:
+            if param.type != BasicType.enum.name and param.type != BasicType.bitmap.name:
                 if len(param.range) > 0:
                     param_str += '    __range__ = {}\n'.format(repr(param.range))
                 if len(param.sub_key) > 0:
@@ -384,8 +396,8 @@ class ParamData:
             sub_key_type = self.param_dict[name].sub_key
             if sub_key_type == '0':
                 string = [v.parameters for k, v in fmt.key_value.items()][0]
-                params_list_str, desc_list_str = self.__get_param_desc_from_string(string, fmt.info.sheet_suffix)
-                code_lines += '    {}: zip([{}], [{}]),\n'.format(sub_key_type, params_list_str, desc_list_str)
+                pair_list_str = self.__get_param_desc_from_string(string, fmt.info.sheet_suffix)
+                code_lines += '    {}: ({}),\n'.format(sub_key_type, pair_list_str)
             else:
                 fmt_item_list = [v for k, v in fmt.key_value.items()]
                 enum_item_list = [k for k, v in self.param_dict[sub_key_type].key_value.items()]
@@ -394,8 +406,8 @@ class ParamData:
                     assert(isinstance(fmt_item, FormatRec.KeyValue))
                     assert(isinstance(enum_item, str))
                     key_str = '{}.{}'.format(sub_key_type, enum_item)
-                    params_list_str, desc_list_str = self.__get_param_desc_from_string(fmt_item.parameters, fmt.info.sheet_suffix)
-                    code_lines += '    {}: zip([{}], [{}]),\n'.format(key_str, params_list_str, desc_list_str)
+                    pair_list_str = self.__get_param_desc_from_string(fmt_item.parameters, fmt.info.sheet_suffix)
+                    code_lines += '    {}: ({},),\n'.format(key_str, pair_list_str)
             code_lines += '}\n'
         return code_lines
 
@@ -419,43 +431,55 @@ class ParamData:
             print(p)
 
 
-__code_lines__ = ParamData().to_file()
-if __code_lines__ != '':
-    exec(__code_lines__)
-else:
-    _exit(0)
+try:
+    __code_lines__ = ParamData().to_file()
+    if __code_lines__ != '':
+        exec(__code_lines__)
+    else:
+        from param import *
+except FileNotFoundError:
+    from param import *
 
 
 class UnpackStream:
     bit_output_sub_key = 0x01
     bit_inc_indent = 0x02
-    bit_bitmap_output_0 = 0x03
-    bit_ignore_extra_param = 0x04
+    bit_bitmap_output_0 = 0x04
+    bit_ignore_extra_param = 0x08
 
     class Item:
-        def __init__(self, p_class, value, length, sub_item=None, bit_pos=0):
+        def __init__(self, p_class, value, length, alias='', sub_item=None, bit_pos=0):
             self.type = p_class
             self.value = value
-            self.length = length
+            self.length = length  # value length
             self.sub_item = sub_item
+            self.alias = alias
             self.bit_pos = bit_pos
 
     class ParseError(Exception):
         pass
 
     @staticmethod
+    def time_trans(value_bytes, time_base):
+        return (str(int.from_bytes(value_bytes, 'little') * time_base) + ' ms').replace('.0 ms', ' ms').replace('000 ms', ' s')
+
+    @staticmethod
     def param_to_str(item, indent):
         title_length = 40
         assert(isinstance(item, UnpackStream.Item))
-        if hasattr(item.type, '__description__'):
-            title_str = eval(item.type.__name__+'.__description__')
+        if item.alias != '':
+            title_str = item.alias
         else:
-            title_str = item.type.__name__.replace('_', ' ')
+            if hasattr(item.type, '__description__'):
+                title_str = eval(item.type.__name__+'.__description__')
+            else:
+                title_str = item.type.__name__.replace('_', ' ')
         if item.value is None:
             if hasattr(item.type, '__cfg_flag__') and item.type.__cfg_flag__ & UnpackStream.bit_ignore_extra_param > 0:
                 return ''
             else:
                 return ' ' * 4 * (1 + indent) + ('{:%ds}: {}' % (title_length - 4 * indent)).format(title_str, 'Warning(No More Data !)')
+        data_str = []
         try:
             p_type = item.type.__data_type__
             p_length = item.length if not (isinstance(item.type.__bit_width__, str) and '/' in item.type.__bit_width__)\
@@ -463,36 +487,53 @@ class UnpackStream:
             unpack_len = item.length
             if p_type == 'unsigned':
                 unsigned_unpack = {1: 'B', 2: 'H', 4: 'I', 8: 'Q'}
-                data_str = str(unpack(unsigned_unpack[unpack_len], item.value)[0])
+                data_str.append(str(unpack(unsigned_unpack[unpack_len], item.value)[0]))
             elif p_type == 'signed':
                 signed_unpack = {1: 'b', 2: 'h', 4: 'i', 8: 'q'}
-                data_str = str(unpack(signed_unpack[unpack_len], item.value)[0])
+                data_str.append(str(unpack(signed_unpack[unpack_len], item.value)[0]))
             elif p_type == 'stream':
-                data_str = ''.join('{:02X} '.format(x) for x in item.value)
+                data_str.append(''.join('{:02X} '.format(x) for x in item.value))
             elif p_type == 'hex':
-                data_str = ''.join(('0x{:0%dX}' % (p_length * 2)).format(int.from_bytes(item.value, 'little')))
+                data_str.append(''.join(('0x{:0%dX}' % (p_length * 2)).format(int.from_bytes(item.value, 'little'))))
             elif p_type == 'address':
-                data_str = ':'.join('{:02X}'.format(x) for x in item.value[::-1])
+                data_str.append(':'.join('{:02X}'.format(x) for x in item.value[::-1]))
             elif p_type == 'T0_625ms':
-                data_str = ''.join(('0x{:0%dX}' % (p_length * 2)).format(int.from_bytes(item.value, 'little'))) + \
-                       ' (' + str(int.from_bytes(item.value, 'little') * 0.625) + 'ms' + ')'.replace('000ms', 's')
+                data_str.append(''.join(('0x{:0%dX}' % (p_length * 2)).format(int.from_bytes(item.value, 'little'))) +
+                                ' ({})'.format(UnpackStream.time_trans(item.value, 0.625)))
             elif p_type == 'T1_25ms':
-                data_str = ''.join(('0x{:0%dX}' % (p_length * 2)).format(int.from_bytes(item.value, 'little'))) + \
-                       ' (' + str(int.from_bytes(item.value, 'little') * 1.25) + 'ms' + ')'.replace('000ms', 's')
+                data_str.append(''.join(('0x{:0%dX}' % (p_length * 2)).format(int.from_bytes(item.value, 'little'))) +
+                                ' ({})'.format(UnpackStream.time_trans(item.value, 1.25)))
             elif p_type == 'T10ms':
-                data_str = ''.join(('0x{:0%dX}' % (p_length * 2)).format(int.from_bytes(item.value, 'little'))) + \
-                       ' (' + str(int.from_bytes(item.value, 'little') * 10) + 'ms' + ')'.replace('000ms', 's')
+                data_str.append(''.join(('0x{:0%dX}' % (p_length * 2)).format(int.from_bytes(item.value, 'little'))) +
+                                ' ({})'.format(UnpackStream.time_trans(item.value, 10)))
             elif p_type == 'enum':
                 value, enum_value = int.from_bytes(item.value, 'little'), [c.value for c in item.type]
                 if value in enum_value and hasattr(item.type, '__Des_{}__'.format(item.type(value).name)):
-                    data_str = eval(item.type.__name__+'.__Des_{}__'.format(item.type(value).name))
+                    tmp_str = eval(item.type.__name__+'.__Des_{}__'.format(item.type(value).name))
                 else:
-                    data_str = str(item.type(int.from_bytes(item.value, 'little')).name)
-                data_str += ' (' + ''.join('0x{:02X}'.format(int.from_bytes(item.value, 'little'))) + ')'
+                    tmp_str = str(item.type(int.from_bytes(item.value, 'little')).name)
+                tmp_str += ' (' + ''.join('0x{:02X}'.format(int.from_bytes(item.value, 'little'))) + ')'
+                data_str.append(tmp_str)
+            elif p_type == 'bitmap':
+                value, enum_value = int.from_bytes(item.value, 'little'), [c.value for c in item.type]
+                data_str.append(("{:0%db}  " % (p_length * 8)).format(int.from_bytes(item.value, 'little')) +
+                                ''.join(('0x{:0%dX}' % (p_length * 2)).format(int.from_bytes(item.value, 'little'))))
+                for i in range(max(enum_value)+1):
+                    try:
+                        if value & (1 << i) != 0 or (hasattr(item.type, '__cfg_flag__') and item.type.__cfg_flag__ & UnpackStream.bit_bitmap_output_0 > 0):
+                            dots = ['.' for _ in range(p_length * 8)]
+                            dots[-1 - i] = '1' if (value & (1 << i)) > 0 else '0'
+                            if i in enum_value and hasattr(item.type, '__Des_{}__'.format(item.type(i).name)):
+                                tmp_str = ''.join(dots) + '  ' + eval(item.type.__name__+'.__Des_{}__'.format(item.type(i).name))
+                            else:
+                                tmp_str = ''.join(dots) + '  ' + str(item.type(i).name)
+                            data_str.append(tmp_str)
+                    except ValueError:
+                        pass
             else:
                 raise ValueError
         except ValueError:
-            data_str = ''.join('{:02X} '.format(x) for x in item.value) + ' (Unknown)'
+            data_str.append(''.join('{:02X} '.format(x) for x in item.value) + ' (Unknown)')
 
         bit_cnt = bit_width = 0  # use for bit map parameters
         if isinstance(item.type.__bit_width__, str):
@@ -501,7 +542,10 @@ class UnpackStream:
         if bit_cnt > 0 and bit_width > 0:
             title_str += ' (bit[' + str(bit_width - item.bit_pos - 1) + \
                          ('])' if bit_cnt == 1 else ':{}])'.format(bit_width - item.bit_pos - bit_cnt))
-        return ' ' * 4 * (1+indent) + ('{:%ds}: {}' % (title_length-4*indent)).format(title_str, data_str)
+        ret_str = ' ' * 4 * (1+indent) + ('{:%ds}: {}' % (title_length-4*indent)).format(title_str, data_str[0])
+        for i in range(1, len(data_str)):
+            ret_str += '\n' + ' ' * (4 * (1+indent) + title_length + 2) + data_str[i]
+        return ret_str
 
     def __init__(self, stream):
         self.stream = stream
@@ -513,11 +557,11 @@ class UnpackStream:
         assert(isinstance(parse_rec, list))
         parse_result = []
         pc = 0  # parsing current pos by byte
-        bit_pos = 0  # only use for param whith bit_width is 'a/b'
+        bit_pos = 0  # only use for param with bit_width is 'a/b'
         try:
             for p_class, alias in unpack_fmt[key]:
                 if pc == len(stream):
-                    parse_result.append(self.Item(p_class, None, 0))
+                    parse_result.append(self.Item(p_class, None, 0, alias))
                     continue
                 if isinstance(p_class.__bit_width__, str) and fullmatch(RegExp.PARAM_WIDTH_BIT, p_class.__bit_width__) is None or\
                         isinstance(p_class.__bit_width__, int):  # param for length or number for length
@@ -525,6 +569,7 @@ class UnpackStream:
                     if isinstance(p_class.__bit_width__, int):
                         p_len = (p_class.__bit_width__ // 8) if p_class.__bit_width__ != 0 else len(stream[pc:])
                     else:
+                        assert(isinstance(p_class.__bit_width__, str))
                         class_type = globals()[p_class.__bit_width__]
                         p_len = -1
                         for rec in parse_rec[::-1]:
@@ -535,11 +580,11 @@ class UnpackStream:
                         if p_len < 0:
                             raise UnpackStream.ParseError
                     if pc + p_len > len(stream):
-                        item = self.Item(p_class, None, 0)
+                        item = self.Item(p_class, None, 0, alias)
                     elif hasattr(p_class, '__sub_key__'):
-                        item = self.Item(p_class, stream[pc:pc+p_len], p_len, [])
+                        item = self.Item(p_class, stream[pc:pc+p_len], p_len, alias, [])
                     else:
-                        item = self.Item(p_class, stream[pc:pc+p_len], p_len)
+                        item = self.Item(p_class, stream[pc:pc+p_len], p_len, alias)
                     pc += p_len
                     parse_result.append(item)
                 else:  # param's length counts by bits
@@ -547,7 +592,7 @@ class UnpackStream:
                     cnt, bit_all = [int(num, 0) for num in p_class.__bit_width__.split('/')]
                     p_len = bit_all // 8
                     if pc + p_len > len(stream):
-                        parse_result.append(self.Item(p_class, stream[pc:], len(stream[pc:])))
+                        parse_result.append(self.Item(p_class, stream[pc:], len(stream[pc:]), alias))
                         break
                     else:
                         unsigned_pack = {1: 'B', 2: 'H', 4: 'I', 8: 'Q'}
@@ -555,7 +600,7 @@ class UnpackStream:
                         value = int.from_bytes(value_bytes, 'little')
                         value = (value >> (bit_all - cnt - bit_pos)) & ~((-1) << cnt)
                         value_bytes = pack('<' + unsigned_pack[p_len], value)
-                        item = self.Item(p_class, value_bytes, p_len)
+                        item = self.Item(p_class, value_bytes, p_len, alias)
                         item.bit_pos = bit_pos
                         parse_result.append(item)
                         bit_pos += cnt
@@ -566,6 +611,7 @@ class UnpackStream:
                 parse_result.append(self.Item(eval('Unused'), stream[pc:], len(stream[pc:])))
             for item in parse_result:
                 assert(isinstance(item, UnpackStream.Item))
+                parse_rec.append(item)
                 if item.sub_item is not None:
                     try:
                         if item.type.__sub_key__ == '0':
@@ -586,17 +632,19 @@ class UnpackStream:
         return parse_result
 
     def to_string(self, res=None, level=0, indent=0):
+        string_ret = ''
         if res is None:
-            print(''.join('{:02X} '.format(x) for x in self.stream))
+            string_ret += ''.join('{:02X} '.format(x) for x in self.stream) + '\n'
             res = self.result
         for i in res:
             if i.sub_item is not None:
                 if hasattr(i.type, '__cfg_flag__') and i.type.__cfg_flag__ & self.bit_output_sub_key > 0:
-                    print(self.param_to_str(i, indent))
+                    string_ret += self.param_to_str(i, indent) + '\n'
                 ind = 1 if hasattr(i.type, '__cfg_flag__') and i.type.__cfg_flag__ & self.bit_inc_indent > 0 else 0
-                self.to_string(i.sub_item, level + 1, indent + ind)
+                string_ret += self.to_string(i.sub_item, level + 1, indent + ind)
             else:
-                print(self.param_to_str(i, indent))
+                string_ret += self.param_to_str(i, indent) + '\n'
+        return string_ret
 
     def dump(self, res=None, level=0, indent=0):
         if res is None:
