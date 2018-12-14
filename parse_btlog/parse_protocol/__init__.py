@@ -211,6 +211,15 @@ class ParamData:
                 print("Warning: Parse failed in Sheet '{}', line {}".format(sheet_name, i+1+self.RESERVED_LINE))
         return True
 
+    def format_to_param(self):
+        # """Auto generate"""
+        fmt_name = [k for k, v in self.format_dict.items()]
+        param_name = [name for name, fmt in self.param_dict.items()]
+        for name in set(fmt_name) - set(param_name):
+            # print(self.format_dict[name].key_value)
+            if name not in self.param_dict and '0' in self.format_dict[name].key_value and len(self.format_dict[name].key_value) == 1:
+                self.param_dict[name] = ParameterRec('auto_gen_'+name, '0', 'stream', '0', '', '', '', '', '', '', 0)
+
     def read(self, filename):
         book = xlrd.open_workbook(filename)
         proto_names = list('')
@@ -236,6 +245,7 @@ class ParamData:
             param_data = [[str(int(a)) if type(a) == float else str(a).strip() for a in j] for j in param_data]
             if not self.param_data_to_class(param_data, param_name) or not self.format_data_to_class(format_data, fmt_name):
                 return False
+        self.format_to_param()
         return True
 
     def validation(self):
@@ -285,9 +295,7 @@ class ParamData:
                     return False
         for name, fmt in self.format_dict.items():  # formats
             assert(isinstance(fmt, FormatRec))
-            if name == 'PROTO_ALL':
-                pass
-            elif name not in self.param_dict:
+            if name not in self.param_dict:
                 print("Warning: Format '{}' not defined as parameter. Sheet '{}', line {}".
                       format(fmt.command, fmt.info.sheet_name, fmt.info.line))
             elif self.param_dict[name].sub_key == '':
@@ -301,29 +309,31 @@ class ParamData:
                         print("Error: Format {} invalid, Param '{}' not defined. Sheet '{}', line {}".
                               format(fmt.command, param, fmt.info.sheet_name, fmt.info.line))
                         return False
-            if name != 'PROTO_ALL':
-                fmt_keys = [k for k, v in fmt.key_value.items()]
-                sub_key = self.param_dict[name].sub_key
-                if sub_key == '0':
-                    param_values = ['0']
-                else:
-                    param_values = [v.value for k, v in self.param_dict[sub_key].key_value.items()]
-                if len(fmt_keys) != len(param_values):
-                    print("Error: Format {} invalid, the number of items in Param {}'s sub_key {} is different. Sheet '{}', line {}".
-                          format(fmt.command, self.param_dict[name].name, self.param_dict[sub_key].name, fmt.info.sheet_name, fmt.info.line))
+            fmt_keys = [k for k, v in fmt.key_value.items()]
+            sub_key = self.param_dict[name].sub_key
+            if sub_key == '0':
+                param_values = ['0']
+            else:
+                param_values = [v.value for k, v in self.param_dict[sub_key].key_value.items()]
+            if len(fmt_keys) != len(param_values):
+                print("Error: Format {} invalid, the number of items in Param {}'s sub_key {} is different. Sheet '{}', line {}".
+                      format(fmt.command, self.param_dict[name].name, self.param_dict[sub_key].name, fmt.info.sheet_name, fmt.info.line))
+                return False
+            for a, b in zip(fmt_keys, param_values):
+                if int(a, 0) != int(b, 0):
+                    print("Error: Format {} invalid, enum value and sub_key {}'s value is different. Sheet '{}', line {}".
+                          format(fmt.command, self.param_dict[name].name, fmt.info.sheet_name, fmt.info.line))
                     return False
-                for a, b in zip(fmt_keys, param_values):
-                    if int(a, 0) != int(b, 0):
-                        print("Error: Format {} invalid, enum value and sub_key {}'s value is different. Sheet '{}', line {}".
-                              format(fmt.command, self.param_dict[name].name, fmt.info.sheet_name, fmt.info.line))
-                        return False
 
         #  Unused check
         params_in_format = {'PROTO_ALL'}
         formats = set()
         for name, fmt in self.format_dict.items():
+            symbol = fmt.info.sheet_suffix
             for k, item in fmt.key_value.items():
-                params_in_format |= set([type_desc.split()[0] for type_desc in item.parameters.split('|')])
+                params_list = [type_desc.split()[0] for type_desc in item.parameters.split('|')]
+                params_list = [p if symbol + p not in self.param_dict else symbol + p for p in params_list]
+                params_in_format |= set(params_list)
                 formats.add(name)
         params_in_type = set([p.type for k, p in self.param_dict.items()])
         params_in_sub_key = set([p.sub_key for k, p in self.param_dict.items()])
@@ -337,10 +347,9 @@ class ParamData:
             param = self.param_dict[undefined]
             print("Error: Format {} undefined. Sheet '{}', line {}".format(param.name, param.info.sheet_name, param.info.line))
             return False
-        for unused in params_in_param_name - (params_in_format | params_in_type | params_in_sub_key):
+        for unused in (params_in_param_name - (params_in_format | params_in_type | params_in_sub_key)):
             param = self.param_dict[unused]
             print("Warning: Unused parameter '{}'. Sheet '{}', line {}".format(param.name, param.info.sheet_name, param.info.line))
-
         return True
 
     def __get_param_desc_from_string(self, string, sheet_suffix):
@@ -561,7 +570,9 @@ class UnpackStream:
         try:
             for p_class, alias in unpack_fmt[key]:
                 if pc == len(stream):
-                    parse_result.append(self.Item(p_class, None, 0, alias))
+                    item = self.Item(p_class, None, 0, alias)
+                    parse_result.append(item)
+                    parse_rec.append(item)
                     continue
                 if isinstance(p_class.__bit_width__, str) and fullmatch(RegExp.PARAM_WIDTH_BIT, p_class.__bit_width__) is None or\
                         isinstance(p_class.__bit_width__, int):  # param for length or number for length
@@ -587,12 +598,15 @@ class UnpackStream:
                         item = self.Item(p_class, stream[pc:pc+p_len], p_len, alias)
                     pc += p_len
                     parse_result.append(item)
+                    parse_rec.append(item)
                 else:  # param's length counts by bits
                     assert('/' in p_class.__bit_width__)
                     cnt, bit_all = [int(num, 0) for num in p_class.__bit_width__.split('/')]
                     p_len = bit_all // 8
                     if pc + p_len > len(stream):
-                        parse_result.append(self.Item(p_class, stream[pc:], len(stream[pc:]), alias))
+                        item = self.Item(p_class, stream[pc:], len(stream[pc:]), alias)
+                        parse_result.append(item)
+                        parse_rec.append(item)
                         break
                     else:
                         unsigned_pack = {1: 'B', 2: 'H', 4: 'I', 8: 'Q'}
@@ -603,15 +617,17 @@ class UnpackStream:
                         item = self.Item(p_class, value_bytes, p_len, alias)
                         item.bit_pos = bit_pos
                         parse_result.append(item)
+                        parse_rec.append(item)
                         bit_pos += cnt
                         if bit_pos >= bit_all:
                             bit_pos = 0
                             pc += p_len
             if pc < len(stream):
-                parse_result.append(self.Item(eval('Unused'), stream[pc:], len(stream[pc:])))
+                item = self.Item(eval('Unused'), stream[pc:], len(stream[pc:]))
+                parse_result.append(item)
+                parse_rec.append(item)
             for item in parse_result:
                 assert(isinstance(item, UnpackStream.Item))
-                parse_rec.append(item)
                 if item.sub_item is not None:
                     try:
                         if item.type.__sub_key__ == '0':

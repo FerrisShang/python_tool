@@ -2,6 +2,7 @@ from bt_usb import *
 from random import randint
 from threading import Timer
 
+
 class Item:
     TYPE_VARIABLE = 0
     TYPE_PLACEHOLDER = 1
@@ -12,6 +13,7 @@ class Item:
         self.name = name
         self.length = length
         self.type = item_type
+
     def __str__(self):
         return 'Item: T-{} L-{} N-{} D-{}'.format(self.type, self.length, self.name, self.data)
 
@@ -37,7 +39,7 @@ class LineParam:
             self.title, self.repeat, self.delay = tmp[0].strip(), int(tmp[1].strip()), int(tmp[2].strip())
         data_str = data_str[1].strip()
         pos = 0
-        while(pos < len(data_str)):
+        while pos < len(data_str):
             idx_st = data_str.find('{', pos)
             if idx_st >= 0:
                 if idx_st > 0:
@@ -58,13 +60,14 @@ class LineParam:
                 item = Item(Item.TYPE_HEX_DATA, data=bytes.fromhex(data_str[pos:]))
                 self.item_list.append(item)
                 break
+
     def to_hex(self):
         res = b''
         for item in self.item_list:
             if item.type == Item.TYPE_VARIABLE:
                 if item.name not in self.var_pool:
                     print('Variable not in pool!')
-                    assert(False)
+                    assert False
                 res += self.var_pool[item.name]
             elif item.type == Item.TYPE_PLACEHOLDER:
                 res += bytes([randint(0, 0xFF) for _ in range(item.length)])
@@ -80,25 +83,28 @@ class LineParam:
             if item.type == Item.TYPE_VARIABLE:
                 if item.name in self.var_pool:
                     var_data = self.var_pool[item.name]
-                    if pos + len(var_data) <= len(cmp_data) and var_data ==  cmp_data[pos:pos+len(var_data)]:
+                    if pos + len(var_data) <= len(cmp_data) and var_data == cmp_data[pos:pos+len(var_data)]:
                         pos += len(var_data)
                     else:
                         return False
                 else:
                     return False
             elif item.type == Item.TYPE_PLACEHOLDER:
-                if pos + item.length <= len(cmp_data):
+                if item.length == 0:
+                    tmp_var_pool[item.name] = cmp_data[pos:]
+                    pos += len(cmp_data[pos:])
+                elif pos + item.length <= len(cmp_data):
                     tmp_var_pool[item.name] = cmp_data[pos:pos + item.length]
                     pos += item.length
                 else:
                     return False
             elif item.type == Item.TYPE_HEX_DATA:
-                if pos + len(item.data) <= len(cmp_data) and item.data ==  cmp_data[pos:pos+len(item.data)]:
+                if pos + len(item.data) <= len(cmp_data) and item.data == cmp_data[pos:pos+len(item.data)]:
                     pos += len(item.data)
                 else:
                     return False
         if pos == len(cmp_data):
-            for n,d in tmp_var_pool.items():
+            for n, d in tmp_var_pool.items():
                 self.var_pool[n] = d
             return True
         else:
@@ -160,21 +166,23 @@ class SnoopRepeat:
 
 
 def bt_usb_callback(data, param):
+    if not hasattr(bt_usb_callback, "last_sr"):
+        bt_usb_callback.last_sr = None
     sr = param
     assert(isinstance(sr, SnoopRepeat))
     rsp = sr.get_response(data)
-    if rsp is not None:
+    if rsp is not None and bt_usb_callback.last_sr != rsp:
         assert(isinstance(rsp.send, LineParam))
+        bt_usb_callback.last_sr = rsp
         rsp_data = rsp.send.to_hex()
         for _ in range(rsp.send.repeat):
             if rsp.send.delay > 0:
-                Timer((rsp.send.delay + randint(-10, 0)) / 1000, bt_usb.send, [rsp_data]).start()
+                Timer((rsp.send.delay + randint(-10, 10)) / 1000, bt_usb.send, [rsp_data]).start()
             else:
                 bt_usb.send(rsp_data)
 
 if __name__ == '__main__':
-    sr = SnoopRepeat()
-    sr.parse_file('snoop_rec.txt')
-    bt_usb = BtUsb(bt_usb_callback, sr, dump_log=True)
+    _sr = SnoopRepeat()
+    _sr.parse_file('snoop_rec.txt')
+    bt_usb = BtUsb(bt_usb_callback, _sr, dump_log=True)
     bt_usb.send(b'\x01\x03\x0c\x00')
-
