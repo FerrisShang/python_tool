@@ -275,10 +275,16 @@ class ParamData:
                       format(param.name, param.width, param.info.sheet_name, param.info.line))
                 return False
             # validate type
-            if param.type not in [p.name for p in BasicType] and param.type not in self.param_dict:
-                print("Error: Param '{}' type invalid, param '{}' is not a valid BasicType or not defined. Sheet '{}', line {}".
-                      format(param.name, param.type, param.info.sheet_name, param.info.line))
-                return False
+            if param.type not in [p.name for p in BasicType]:
+                if param.type not in self.param_dict:
+                    print("Error: Param '{}' type invalid, param '{}' is not a valid BasicType or not defined. Sheet '{}', line {}".
+                          format(param.name, param.type, param.info.sheet_name, param.info.line))
+                    return False
+                else:
+                    check_list = [param.width, param.sub_key, param.range, param.default, param.cfg_flag, param.description]
+                    if sum([0 if check == '' else 1 for check in check_list]) > 0:
+                        print("Warning: Param '{}' is reference to '{}' which is not a BasicType, All column should be empty except name & type. Sheet '{}', line {}".
+                              format(param.name, param.type, param.info.sheet_name, param.info.line))
             if param.type == param.name:
                 print("Error: Param '{}' type invalid, type can NOT reference itself. Sheet '{}', line {}".
                       format(param.name, param.width, param.info.sheet_name, param.info.line))
@@ -560,13 +566,37 @@ class UnpackStream:
         self.stream = stream
         self.result = self.unpack(stream)
 
-    def unpack(self, stream, unpack_fmt=None, key=None, parse_rec=None):
+    def unpack(self, stream):
+        parse_result = self.__unpack__(stream)
+        # Adjust recursive parameters
+        self.__adjust_recursive_param__(parse_result)
+        return parse_result
+
+    def __adjust_recursive_param__(self, parse_result):
+        list_len = len(parse_result)
+        idx = 0
+        while idx < list_len:
+            param = parse_result[idx]
+            assert(isinstance(param, self.Item))
+            if param.sub_item is not None:
+                for sub_idx in range(len(param.sub_item)):
+                    if param.type == param.sub_item[sub_idx].type:
+                        sub_item_value_len = 0 if param.sub_item[sub_idx].value is None else len(param.sub_item[sub_idx].value)
+                        param.value = param.value[:-sub_item_value_len]
+                        parse_result.insert(idx+1, param.sub_item[sub_idx])
+                        param.sub_item.remove(param.sub_item[sub_idx])
+                        list_len += 1
+                        break
+                self.__adjust_recursive_param__(param.sub_item)
+            idx += 1
+
+    def __unpack__(self, stream, unpack_fmt=None, key=None, parse_rec=None):
         if unpack_fmt is None:
             (unpack_fmt, key, parse_rec) = (eval('fmt_PROTO_ALL'), 0, [])
         assert(isinstance(parse_rec, list))
         parse_result = []
         pc = 0  # parsing current pos by byte
-        bit_pos = 0  # only use for param with bit_width is 'a/b'
+        bit_pos = bit_all = 0  # only use for param with bit_width is 'a/b'
         try:
             for p_class, alias in unpack_fmt[key]:
                 if pc == len(stream):
@@ -607,6 +637,7 @@ class UnpackStream:
                         item = self.Item(p_class, stream[pc:], len(stream[pc:]), alias)
                         parse_result.append(item)
                         parse_rec.append(item)
+                        pc += len(stream[pc:])
                         break
                     else:
                         unsigned_pack = {1: 'B', 2: 'H', 4: 'I', 8: 'Q'}
@@ -622,6 +653,8 @@ class UnpackStream:
                         if bit_pos >= bit_all:
                             bit_pos = 0
                             pc += p_len
+            if 0 < bit_pos < bit_all:  # bit_width not full used, Adjust pc to skip bytes
+                pc += bit_all // 8
             if pc < len(stream):
                 item = self.Item(eval('Unused'), stream[pc:], len(stream[pc:]))
                 parse_result.append(item)
@@ -639,7 +672,7 @@ class UnpackStream:
                                     sub_key = int.from_bytes(find_k.value, 'little')
                                     sub_key = find_k.type(sub_key)
                                     break
-                        item.sub_item = self.unpack(item.value, eval('fmt_' + item.type.__name__), sub_key, parse_rec)
+                        item.sub_item = self.__unpack__(item.value, eval('fmt_' + item.type.__name__), sub_key, parse_rec)
                     except ValueError:
                         item.sub_item = None
         except ValueError:
