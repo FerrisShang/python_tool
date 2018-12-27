@@ -116,20 +116,30 @@ class LineParam:
 
 class SnoopRepeat:
     class SrPair:
-        def __init__(self, send=None, recv=None, recv_cnt=0):
+        def __init__(self, send=None, recv=None, debug=None, recv_cnt=0):
             self.send = send
             self.recv = recv
+            self.debug = debug
             self.recv_cnt = recv_cnt
 
-    def __init__(self):
+    def __init__(self, in_order=False):
         self.variable_pool = {}
         self.line_list = []
         self.sr_list = []
+        self.in_order_idx = 0
+        self.in_order = in_order
+        self.in_order_reserve = 0
         self.__cur_sr__ = SnoopRepeat.SrPair(recv=LineParam(self.variable_pool, 'RECV:040E0401030C00'))
 
     def parse_line(self, line_str):
         assert(isinstance(line_str, str))
-        if line_str.strip()[0] == '#':
+        if len(line_str.strip()) == 0 or line_str.strip()[0] == '#':
+            return
+        if 'DEBUG:' in line_str.strip():
+            self.__cur_sr__.debug = line_str.strip()
+            return
+        if 'REPEAT:' in line_str.strip():
+            self.in_order_reserve = len(self.sr_list)
             return
         lp = LineParam(self.variable_pool, line_str)
         self.line_list.append(lp)
@@ -147,14 +157,28 @@ class SnoopRepeat:
         f.close()
 
     def get_response(self, cmp_data):
-        for sr in self.sr_list:
+        if self.in_order:
+            sr = self.sr_list[self.in_order_idx]
             assert(isinstance(sr, SnoopRepeat.SrPair))
             assert(isinstance(sr.recv, LineParam))
             if sr.recv.hexcmp(cmp_data):
                 sr.recv_cnt += 1
                 if sr.recv_cnt >= sr.recv.repeat:
                     sr.recv_cnt = 0
+                    if self.in_order_idx + 1 >= len(self.sr_list):
+                        self.in_order_idx = self.in_order_reserve
+                    else:
+                        self.in_order_idx += 1
                     return sr
+        else:
+            for sr in self.sr_list:
+                assert(isinstance(sr, SnoopRepeat.SrPair))
+                assert(isinstance(sr.recv, LineParam))
+                if sr.recv.hexcmp(cmp_data):
+                    sr.recv_cnt += 1
+                    if sr.recv_cnt >= sr.recv.repeat:
+                        sr.recv_cnt = 0
+                        return sr
         return None
 
     def var_add(self, name, data):
@@ -171,9 +195,11 @@ def bt_usb_callback(data, param):
     sr = param
     assert(isinstance(sr, SnoopRepeat))
     rsp = sr.get_response(data)
-    if rsp is not None and bt_usb_callback.last_sr != rsp:
+    if rsp is not None and (sr.in_order or bt_usb_callback.last_sr != rsp):
         assert(isinstance(rsp.send, LineParam))
         bt_usb_callback.last_sr = rsp
+        if rsp.debug:
+            print(rsp.debug)
         rsp_data = rsp.send.to_hex()
         for _ in range(rsp.send.repeat):
             if rsp.send.delay > 0:

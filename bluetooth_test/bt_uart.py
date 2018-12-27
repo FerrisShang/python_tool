@@ -43,9 +43,9 @@ class BtUart(Event):
         self.__param__ = param
         try:
             self.device = serial.Serial(port=port, baudrate=baudrate, rtscts=rtscts)
-            self.device.setTimeout(0.2)
-            self.device.setWriteTimeout(0)
-            self.device.setBufferSize(self.__RX_BUFFER_SIZE__)
+            self.device.timeout = 0.2
+            if hasattr(self.device, 'setBufferSize'):
+                self.device.setBufferSize(self.__RX_BUFFER_SIZE__)
             self.device.flushInput()
             self.device.flushOutput()
         except Exception as e:
@@ -167,7 +167,7 @@ def __recv_cb__(msg, param):
 
 
 if __name__ == '__main__':
-    bt_uart = BtUart('COM1', baudrate=115200, rtscts=True, callback=__recv_cb__, dump_log=True)
+    bt_uart = BtUart('/dev/ttyACM0', baudrate=115200, rtscts=True, callback=__recv_cb__, dump_log=True)
     bt_uart.send(b'\x01\x03\x0c\x00')
     from time import sleep
     sleep(10)
