@@ -1,11 +1,14 @@
 from os import system as system_call
 from platform import system as system_name
 import subprocess
+from darwin_ping import darwin_ping as ping
 
 
 def cus_ping(host):
     if system_name().lower() == "windows":
         p = subprocess.Popen(["ping", "-n", "24", host], stdout=subprocess.PIPE)
+    elif system_name().lower() == "darwin":
+        return ping(host)
     else:
         p = subprocess.Popen(["ping", "-c", "24", host], stdout=subprocess.PIPE)
     p_bytes = str(p.communicate()[0])
@@ -26,3 +29,6 @@ def cus_ping(host):
         lost = list(str(p_bytes).split('%')[0].split(' '))[-1]
     return int(int(lost)/100*1200 + int(float(delay)))
     # return int(lost), int(float(delay))
+
+if __name__ == '__main__':
+    cus_ping('8.8.8.8')

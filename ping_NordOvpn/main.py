@@ -64,7 +64,7 @@ class ServerInfo:
         self.delay = delay
 
     def __str__(self):
-        return 'Delay:{}, Name:{}, IP:{}'.format(self.delay, self.name, self.ip)
+        return 'Delay:{:.0f}, Name:{}, IP:{}'.format(self.name, self.delay, self.ip)
 
 
 class ParseOvpn(Thread):
@@ -192,4 +192,4 @@ if __name__ == '__main__':
     delay_list.sort(reverse=True)
     IgnoreSet.set(delay_list)
     for x in delay_list[-15:]:
-        print(x)
+        print('{:.0f} {} {}'.format(x[0], x[1], x[2]))
