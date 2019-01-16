@@ -1,4 +1,5 @@
 from aes import *
+from cmac import *
 
 
 def hexstr2bytes(string):
@@ -28,7 +29,7 @@ def btc_e(key, d):
 
 
 def btc_s1(k, r1, r2):
-    return btc_e(k, r1 + r2)
+    return btc_e(k, r1[8:] + r2[8:])
 
 
 def _btc_c1(k, r, p1, p2):
@@ -44,6 +45,16 @@ def btc_c1(k, r, preq, pres, iat, rat, ia, ra):
     _res = btc_e(k, bxor(r, p1))
     _res = btc_e(k, bxor(_res, p2))
     return _res
+
+
+def btc_f5(W, N1, N2, A1, A2):
+    salt = bytes.fromhex('6C88 8391 AAF5 A538 6037 0BDB 5A60 83BE')
+    key_id = bytes.fromhex('62746c65')
+    length = bytes.fromhex('0100')
+    T = aes_cmac(salt, W)
+    msg = b'\x01' + key_id + N1 + N2 + A1 + A2 + length
+    res = aes_cmac(T, msg)
+    return res
 
 
 def btc_confirm_value(tk, rand, req_cmd, rep_cmd, init_dev_addr_type, init_dev_addr, rsp_dev_addr_type, rsp_dev_addr):
@@ -68,20 +79,20 @@ def btc_ah(k, r):
 if __name__ == '__main__':
     hexdump(hexstr2bytes('01 23 45 67 89 AB CD EF'))
     k = b'\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'
-    r1 = b'\x11\x22\x33\x44\x55\x66\x77\x88'
-    r2 = b'\x99\xAA\xBB\xCC\xDD\xEE\xFF\x00'
+    r1 = bytes.fromhex('000f0e0d0c0b0a091122334455667788')
+    r2 = bytes.fromhex('010203040506070899aabbccddeeff00')
     hexdump(btc_s1(k, r1, r2))  # 9a 1f e1 f0 e8 b0 f4 9b 5b 42 16 ae 79 6d a0 62
 
     hexdump(btc_confirm_value(
         b'\x00' * 16,  # tk
-        brev(hexstr2bytes('31 EB 02 35 11 FE E5 81 43 26 C0 93 5C A8 EE 2D')),  # rand
-        brev(hexstr2bytes('01 04 00 0D 10 03 03')),  # req_cmd
+        brev(hexstr2bytes('1ec1dd0928a3f67973f6fa39acc5642f')),  # rand
+        brev(hexstr2bytes('01 04 00 2D 10 0f 0f')),  # req_cmd
         brev(hexstr2bytes('02 03 00 01 10 02 03')),  # rsp_cmd
         b'\x01',  # iat
-        b'\x00',  # rat
-        brev(hexstr2bytes('F8 B4 F6 AF AC 7D')),  # ia
-        brev(hexstr2bytes('01 A2 20 66 BF 01')),  # ra
-    ))  # 0x7D015D1BAF109ACA14AC8592503838D6
+        b'\x01',  # rat
+        brev(hexstr2bytes('8a ea b5 ed 9b 6c')),  # ia
+        brev(hexstr2bytes('5f 74 de c0 ad de')),  # ra
+    ))  # f1580f3dbac17e2114b4fecc6fe43c37
 
     hexdump(btc_ah(
         brev(hexstr2bytes('30 46 1F D4 F5 49 93 C4 2D 6C DA DE 29 99 EA 9D')),  # IRK
