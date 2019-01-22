@@ -1,7 +1,7 @@
 from struct import unpack
 
 __all__ = [
-    'aes_cmac',
+    'aes_cmac',  # rfc4933
 ]
 
 AES_128_ROUNDS = 10

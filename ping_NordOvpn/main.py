@@ -64,7 +64,7 @@ class ServerInfo:
         self.delay = delay
 
     def __str__(self):
-        return 'Delay:{:.0f}, Name:{}, IP:{}'.format(self.name, self.delay, self.ip)
+        return 'Delay:{:.0f}, Name:{}, IP:{}'.format(self.delay, self.name, self.ip)
 
 
 class ParseOvpn(Thread):
