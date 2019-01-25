@@ -1,5 +1,6 @@
 from aes import *
 from cmac import *
+from crc import *
 
 
 def hexstr2bytes(string):
@@ -75,6 +76,9 @@ def btc_ah(k, r):
     r = btc_e(k, r)
     return r[-3:]
 
+
+def btc_crc(init_crc, data):
+    return Crc.ll_crc(init_crc, data)
 
 if __name__ == '__main__':
     hexdump(hexstr2bytes('01 23 45 67 89 AB CD EF'))

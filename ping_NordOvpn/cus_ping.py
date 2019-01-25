@@ -4,13 +4,13 @@ import subprocess
 from darwin_ping import darwin_ping as ping
 
 
-def cus_ping(host):
+def cus_ping(host, c=24):
     if system_name().lower() == "windows":
-        p = subprocess.Popen(["ping", "-n", "24", host], stdout=subprocess.PIPE)
+        p = subprocess.Popen(["ping", "-n", c.__str__(), host], stdout=subprocess.PIPE)
     elif system_name().lower() == "darwin":
-        return ping(host)
+        return ping(host, count=c.__str__())
     else:
-        p = subprocess.Popen(["ping", "-c", "24", host], stdout=subprocess.PIPE)
+        p = subprocess.Popen(["ping", "-c", c.__str__(), host], stdout=subprocess.PIPE)
     p_bytes = str(p.communicate()[0])
     delay_list = list(str(p_bytes).split('ms'))
     if len(delay_list) > 1:
@@ -30,5 +30,10 @@ def cus_ping(host):
     return int(int(lost)/100*1200 + int(float(delay)))
     # return int(lost), int(float(delay))
 
+import datetime
 if __name__ == '__main__':
-    cus_ping('8.8.8.8')
+    while True:
+        now = datetime.datetime.now()
+        res = cus_ping('8.8.8.8', c=4)
+        if res < 500:
+            print('\r', now, res, end='')
