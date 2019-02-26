@@ -13,7 +13,7 @@ class Ovpn:
                  tmp_auth_file='/tmp/tmp-vpn-00001.tmp'):
         signal.signal(signal.SIGINT, self.kill_process)
         self.TOUT_SETUP = 30
-        self.DELAY_KILL = 2
+        self.DELAY_KILL = 5
         self.MAX_NO_RESPONSE = 30
         self.username = username
         self.password = password
@@ -38,8 +38,8 @@ class Ovpn:
                 'openvpn',
                 '--config', self.cfg_files[self.cfg_idx],
                 '--auth-user-pass', self.tmp_auth_file,
-                # '--ping-restart', '30',
-                # '--ping', '2'
+                '--ping-restart', '30',
+                '--ping', '2'
             ],
             stdout=subprocess.PIPE)
         time.sleep(0.1)
@@ -51,8 +51,7 @@ class Ovpn:
                 self.create_process()
                 if self.check_setup():
                     self.block_connectivity()
-                else:
-                    self.kill_process(frame='Not Quit')
+                self.kill_process(frame='Not Quit')
                 time.sleep(self.DELAY_KILL)
         except Exception as e:
             self.debug(e)
@@ -97,6 +96,7 @@ class Ovpn:
     def debug(string):
         now = time.strftime("%Y-%m-%d %H:%M:%S")
         print('\r' + now, string)
+        os.system('notify-send "{}"'.format(string))
 
     @staticmethod
     def is_tun_setup(dev_rec_file='/proc/net/dev', dev_name='tun'):
