@@ -6,7 +6,8 @@ from enum import Enum
 
 
 __all__ = [
-    'UnpackStream'
+    'UnpackStream',
+    'PackStream'
 ]
 
 
@@ -33,7 +34,7 @@ class RegExp:
     PARAM_SUB_KEY = '(([A-Za-z][A-Za-z0-9_]+)|0)?'
     PARAM_VALUE = '(0x[A-Fa-f0-9]+)|[0-9]+'
     PARAM_RANGE = '(((0x[A-Fa-f0-9]+)|[0-9]+)-((0x[A-Fa-f0-9]+)|[0-9]+)(\|((0x[A-Fa-f0-9]+)|[0-9]+)-((0x[A-Fa-f0-9]+)|[0-9]+))*)?'
-    PARAM_DEFAULT = '((0x[A-Fa-f0-9]+)|[0-9]+)?'
+    PARAM_DEFAULT = '((0x[A-Fa-f0-9]+)|[-]?[0-9]+)?'
     PARAM_CFG = '(0x[A-Fa-f0-9]+)?'
     FORMAT_PARAM = '[A-Za-z][A-Za-z0-9_]+([ ]+[A-Za-z][A-Za-z0-9_]+)?([ ]*\|[ ]*[A-Za-z][A-Za-z0-9_]+([ ]+[A-Za-z][A-Za-z0-9_]+)?)*'
     PARAM_WIDTH_NUM = '[-]?[0-9]+'
@@ -704,3 +705,267 @@ class UnpackStream:
             print(i.type.__name__, i.value)
             if i.sub_item is not None:
                 self.dump(i.sub_item, level+1, indent+1)
+
+
+class PackStream:
+    bit_output_sub_key = 0x01
+    bit_inc_indent = 0x02
+    bit_bitmap_output_0 = 0x04
+    bit_ignore_extra_param = 0x08
+    bit_param_for_length = 0x10
+    def __init__(self, *args):
+        self.init_args = list(args)
+        self.parse_rec = None
+        self.init_pack = self.pack(self.init_args)
+        self.__cal_length__()
+
+    def __pack__(self, args, pack_fmt=None, parse_rec=None):
+        if pack_fmt is None:
+            pack_fmt = eval('fmt_PROTO_ALL[0]')
+            self.parse_rec = [None for _ in range(len(pack_fmt))]
+            parse_rec = self.parse_rec
+        if not isinstance(args, list):
+            print('Error: Args must be list but {} found -> {}'.format(type(args), args))
+            args = []
+        args = args[:len(pack_fmt)] + [None for _ in range(len(pack_fmt)-len(args))]
+        for i in range(len(parse_rec)):
+            if args[i] is None:
+                args[i] = self.Undefined()
+            parse_rec[i] = self.Rec(FormatRec.KeyValue(*pack_fmt[i]), args[i])
+        self.__check_data__(parse_rec)
+        for i in range(len(parse_rec)):
+            # Check sub format if class has sub_key
+            if hasattr(parse_rec[i].class_type.parameters, '__sub_key__'):
+                if parse_rec[i].class_type.parameters.__sub_key__ == '0':
+                    sub_key = 0
+                else:
+                    sub_key = None
+                    tmp_rec = []  # save all level parameters in tmp_rec
+                    rec_list = [self.parse_rec]
+                    while len(rec_list) > 0:
+                        cur_rec = rec_list.pop()
+                        tmp_rec += cur_rec[:]
+                        if parse_rec[i].class_type.parameters.__sub_key__ in [c.class_type.parameters.__name__ for c in cur_rec]:
+                            break
+                        for r in cur_rec:
+                            if r.sub_rec is not None:
+                                rec_list.insert(0, r.sub_rec)
+
+                    for find_k in tmp_rec[::-1]:
+                        assert(isinstance(find_k, self.Rec))
+                        if find_k.class_type.parameters.__name__ == parse_rec[i].class_type.parameters.__sub_key__:
+                            if isinstance(find_k.value, bytes):
+                                sub_key = int.from_bytes(find_k.value, 'little')
+                            else:
+                                sub_key = find_k.value
+                            try:
+                                sub_key = find_k.class_type.parameters(sub_key)
+                            except ValueError:
+                                sub_key = None
+                            break
+                if sub_key is not None:
+                    sub_format = eval('fmt_' + parse_rec[i].class_type.parameters.__name__ + '[{}]'.format(sub_key))
+                    parse_rec[i].sub_format = list(sub_format)
+                    parse_rec[i].sub_rec = [None for _ in range(len(parse_rec[i].sub_format))]
+                    if type(parse_rec[i].value) == self.Undefined:
+                        parse_rec[i].value = []
+                else:
+                    parse_rec[i].value = self.Undefined()
+        for i in range(len(parse_rec)):
+            if parse_rec[i].sub_format is not None:
+                self.__pack__(parse_rec[i].value, parse_rec[i].sub_format, parse_rec[i].sub_rec)
+
+    def pack(self, args):
+        self.__pack__(args)
+        return self.parse_rec
+
+    @staticmethod
+    def int2bytes(value, bytes_num):  # little-endian
+        from binascii import unhexlify
+        res = unhexlify(('%%0%dx' % (bytes_num*2)) % max(0, value))[::-1]
+        return res
+
+    def __check_data__(self, parse_rec=None):
+        if parse_rec is None:
+            parse_rec = self.parse_rec
+        for i in range(len(parse_rec)):
+            assert(isinstance(parse_rec[i].class_type, FormatRec.KeyValue))
+
+            # Integer to bytes
+            if isinstance(parse_rec[i].value, int):
+                if isinstance(parse_rec[i].class_type.parameters.__bit_width__, int) and \
+                        parse_rec[i].class_type.parameters.__bit_width__ > 0:
+                    parse_rec[i].value = self.int2bytes(parse_rec[i].value, parse_rec[i].class_type.parameters.__bit_width__ // 8)
+                else:
+                    parse_rec[i].value = self.int2bytes(parse_rec[i].value, 2)  # tmp
+                    pass  # TODO: width is bits or Param or other conditions
+            elif isinstance(parse_rec[i].value, list):
+                if not hasattr(parse_rec[i].class_type.parameters, '__sub_key__'):
+                    parse_rec[i].value = self.Undefined()
+            elif not isinstance(parse_rec[i].value, bytes) and not isinstance(parse_rec[i].value, self.Undefined):
+                raise self.DataError('Error value type {}:{}'.format(parse_rec[i].value, type(parse_rec[i].value)))
+
+            # Check if enum key value is valid
+            if parse_rec[i].class_type.parameters.__data_type__ == 'enum':
+                try:
+                    if isinstance(parse_rec[i].value, self.Undefined):
+                        continue
+                    value = int.from_bytes(parse_rec[i].value, 'little')
+                    parse_rec[i].class_type.parameters(value)
+                except ValueError:
+                    print('ValueError: {} is not a valid value of {}'.format(parse_rec[i].value, parse_rec[i].class_type.parameters.__name__))
+                    pass
+            if isinstance(parse_rec[i].class_type.parameters.__bit_width__, int) and \
+                    parse_rec[i].class_type.parameters.__bit_width__ <= 0:
+                pass
+            else:
+                pass  # TODO: check data length
+
+            if parse_rec[i].sub_rec is not None:
+                self.__check_data__(parse_rec[i].sub_rec)
+
+    def __cal_length__(self):
+        tmp_rec = []  # save all level parameters in tmp_rec
+        rec_list = [self.parse_rec]
+        while len(rec_list) > 0:
+            cur_rec = rec_list.pop()
+            tmp_rec += cur_rec[:]
+            for r in cur_rec:
+                if r.sub_rec is not None:
+                    rec_list.insert(0, r.sub_rec)
+        sum_length = 0
+        for r in tmp_rec[::-1]:
+            assert(isinstance(r, self.Rec))
+            if hasattr(r.class_type.parameters, '__cfg_flag__') and r.class_type.parameters.__cfg_flag__ & PackStream.bit_param_for_length > 0:
+                if not hasattr(r.class_type.parameters, '__default__'):
+                    print('Error: Parameter {} miss attribute __default__'.format(r.class_type.parameters.__name__))
+                else:
+                    r.value = self.int2bytes(r.class_type.parameters.__default__ + sum_length, r.class_type.parameters.__bit_width__//8)
+            elif r.sub_format is None and not isinstance(r.value, self.Undefined):
+                sum_length += len(r.value)
+
+    def get_rec_list(self, rec=None, dump=None):
+        if rec is None:
+            rec = self.parse_rec
+            dump = []
+        for r in rec:
+            assert(isinstance(r, self.Rec))
+            if r.sub_format is not None:
+                self.get_rec_list(r.sub_rec, dump)
+            else:
+                dump.append(r)
+        return dump
+
+    def dump_rec(self, rec=None, dump=None):
+        if rec is None:
+            rec = self.parse_rec
+            dump = []
+        for r in rec:
+            assert(isinstance(r, self.Rec))
+            # value = ''.join('{:02X} '.format(x) for x in r.value)
+            if r.sub_format is not None:
+                self.dump_rec(r.sub_rec, dump)
+            else:
+                if isinstance(r.value, self.Undefined):
+                    if r.class_type.remark != '':
+                        title_str = r.class_type.remark
+                    else:
+                        if hasattr(r.class_type.parameters, '__description__'):
+                            title_str = eval(r.class_type.parameters.__name__+'.__description__')
+                        else:
+                            title_str = r.class_type.parameters.__name__.replace('_', ' ')
+                    output = '    {:40s}: {}'.format(title_str, str(r.value))
+                else:
+                    output = UnpackStream.param_to_str(UnpackStream.Item(r.class_type.parameters, r.value, len(r.value)), 0)
+                print(output)
+                dump.append(output)
+        return dump
+
+    def to_stream(self, rec=None):
+        result = b''
+        if rec is None:
+            rec = self.parse_rec
+        for r in rec:
+            if isinstance(r.value, self.Undefined) or r.value is None:
+                return None
+            elif r.sub_format is not None:
+                res = self.to_stream(r.sub_rec)
+                if res is None:
+                    return None
+                result += res
+            else:
+                result += r.value
+        return result
+
+    def to_input_arg(self, rec=None, result=None):
+        if rec is None:
+            result = []
+            rec = self.parse_rec
+            self.__check_data__()
+            self.__cal_length__()
+        for r in rec:
+            if isinstance(r.value, self.Undefined):
+                result.append(None)
+            elif r.sub_format is not None:
+                result.append([])
+                self.to_input_arg(r.sub_rec, result[-1])
+            else:
+                result.append(r.value)
+        return result
+
+    class Rec:
+        enum_get = None
+        value_get = None
+        bitmap_get = None
+        def __init__(self, class_type, value, sub_format=None, sub_rec=None):
+            self.class_type = class_type
+            self.value = value
+            self.sub_format = sub_format
+            self.sub_rec = sub_rec
+
+        def input(self):
+            assert(isinstance(self.class_type, FormatRec.KeyValue))
+            if self.class_type.parameters.__data_type__ == BasicType.enum.name or self.class_type.parameters.__data_type__ == BasicType.bitmap.name:
+                param_dict = OrderedDict()
+                for e in self.class_type.parameters:
+                    if  hasattr(self.class_type.parameters, '__Des_{}__'.format(e.name)):
+                        tmp_str = eval(self.class_type.parameters.__name__+'.__Des_{}__'.format(e.name))
+                    else:
+                        tmp_str = e.name
+                    param_dict[e.value] = tmp_str
+                if self.class_type.parameters.__data_type__ == BasicType.enum.name:
+                    if PackStream.Rec.enum_get is not None:
+                        self.value = PackStream.Rec.enum_get(param_dict)
+                else:
+                    if PackStream.Rec.bitmap_get is not None:
+                        self.value = PackStream.Rec.bitmap_get(param_dict)
+            else:
+                if PackStream.Rec.value_get is not None:
+                    self.value = PackStream.Rec.value_get()
+
+        @staticmethod
+        def init_interface(enum_get=None, bitmap_get=None, value_get=None):
+            PackStream.Rec.enum_get = enum_get  # With one of param_list, return select value
+            PackStream.Rec.bitmap_get = bitmap_get  # With one parameter of param_list, return bitmap value
+            PackStream.Rec.value_get = value_get  # With no parameter, return hex or stream value
+
+        def __str__(self):
+            if isinstance(self.value, PackStream.Undefined):
+                if self.class_type.remark != '':
+                    title_str = self.class_type.remark
+                else:
+                    if hasattr(self.class_type.parameters, '__description__'):
+                        title_str = eval(self.class_type.parameters.__name__+'.__description__')
+                    else:
+                        title_str = self.class_type.parameters.__name__.replace('_', ' ')
+                output = '    {:40s}: {}'.format(title_str, str(self.value))
+            else:
+                output = UnpackStream.param_to_str(UnpackStream.Item(self.class_type.parameters, self.value, len(self.value)), 0)
+            return output
+
+    class Undefined:
+        def __str__(self):
+            return 'Undefined'
+
+    class DataError(Exception):
+        pass
