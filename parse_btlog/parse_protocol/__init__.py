@@ -28,7 +28,7 @@ class RegExp:
     SHEET_FORMAT_NAME = 'Format(_[A-Za-z][A-Za-z0-9]+)?'
     SHEET_PARAM_NAME = 'Param(_[A-Za-z][A-Za-z0-9]+)?'
     PARAM_NAME = '[A-Za-z][A-Za-z0-9_]*'
-    PARAM_WIDTH = '(([A-Za-z][A-Za-z0-9_]+)|([-]?[0-9]+)|([0-9]+/((8)|(16)|(32))))?'
+    PARAM_WIDTH = '(([A-Za-z][A-Za-z0-9_]+)|([-]?[0-9]+)|([0-9]+/[0-9]+/((8)|(16)|(32))))?'
     PARAM_TYPE = PARAM_NAME
     PARAM_KEY = '[A-Za-z][A-Za-z0-9_]+'
     PARAM_SUB_KEY = '(([A-Za-z][A-Za-z0-9_]+)|0)?'
@@ -38,7 +38,7 @@ class RegExp:
     PARAM_CFG = '(0x[A-Fa-f0-9]+)?'
     FORMAT_PARAM = '[A-Za-z][A-Za-z0-9_]+([ ]+[A-Za-z][A-Za-z0-9_]+)?([ ]*\|[ ]*[A-Za-z][A-Za-z0-9_]+([ ]+[A-Za-z][A-Za-z0-9_]+)?)*'
     PARAM_WIDTH_NUM = '[-]?[0-9]+'
-    PARAM_WIDTH_BIT = '[0-9]+/[0-9]+'
+    PARAM_WIDTH_BIT = '[0-9]+/[0-9]+/[0-9]+'
 
 
 class Info:
@@ -254,8 +254,8 @@ class ParamData:
             assert(isinstance(param, ParameterRec))
             # validate bit width
             if fullmatch(RegExp.PARAM_WIDTH_BIT, param.width) is not None:  # bit width
-                n1, n2 = [int(x) for x in param.width.split('/')]
-                if not (n2 > n1 > 0 and n2 % 8 == 0):
+                n0, n1, n2 = [int(x) for x in param.width.split('/')]
+                if not (n2 > n0 >= 0 and n2 > n1 > 0 and n2 % 8 == 0):
                     print("Error: Param '{}' bit_width invalid. Sheet '{}', line {}".format(param.name, param.info.sheet_name, param.info.line))
                     return False
             elif param.width != '' and fullmatch(RegExp.PARAM_WIDTH_NUM, param.width) is None:  # parameter name
@@ -499,7 +499,7 @@ class UnpackStream:
         try:
             p_type = item.type.__data_type__
             p_length = item.length if not (isinstance(item.type.__bit_width__, str) and '/' in item.type.__bit_width__)\
-                else (int(item.type.__bit_width__.split('/')[0]) + 7) // 8
+                else (int(item.type.__bit_width__.split('/')[1]) + 7) // 8
             unpack_len = item.length
             if p_type == 'unsigned':
                 unsigned_unpack = {1: 'B', 2: 'H', 4: 'I', 8: 'Q'}
@@ -551,13 +551,12 @@ class UnpackStream:
         except ValueError:
             data_str.append(''.join('{:02X} '.format(x) for x in item.value) + ' (Unknown)')
 
-        bit_cnt = bit_width = 0  # use for bit map parameters
         if isinstance(item.type.__bit_width__, str):
             assert('/' in item.type.__bit_width__)
-            bit_cnt, bit_width = [int(x) for x in item.type.__bit_width__.split('/')]
-        if bit_cnt > 0 and bit_width > 0:
-            title_str += ' (bit[' + str(bit_width - item.bit_pos - 1) + \
-                         ('])' if bit_cnt == 1 else ':{}])'.format(bit_width - item.bit_pos - bit_cnt))
+            bit_pos, bit_cnt, bit_width = [int(x) for x in item.type.__bit_width__.split('/')]
+            if bit_cnt > 0 and bit_width > 0:
+                title_str += ' (bit[' + str(bit_pos + bit_cnt - 1) + \
+                             ('])' if bit_cnt == 1 else ':{}])'.format(bit_pos))
         ret_str = ' ' * 4 * (1+indent) + ('{:%ds}: {}' % (title_length-4*indent)).format(title_str, data_str[0])
         for i in range(1, len(data_str)):
             ret_str += '\n' + ' ' * (4 * (1+indent) + title_length + 2) + data_str[i]
@@ -632,7 +631,7 @@ class UnpackStream:
                     parse_rec.append(item)
                 else:  # param's length counts by bits
                     assert('/' in p_class.__bit_width__)
-                    cnt, bit_all = [int(num, 0) for num in p_class.__bit_width__.split('/')]
+                    pos, cnt, bit_all = [int(num, 0) for num in p_class.__bit_width__.split('/')]
                     p_len = bit_all // 8
                     if pc + p_len > len(stream):
                         item = self.Item(p_class, stream[pc:], len(stream[pc:]), alias)
@@ -651,6 +650,7 @@ class UnpackStream:
                         parse_result.append(item)
                         parse_rec.append(item)
                         bit_pos += cnt
+                        assert(bit_pos == bit_all - pos)
                         if bit_pos >= bit_all:
                             bit_pos = 0
                             pc += p_len
@@ -876,7 +876,7 @@ class PackStream:
                             title_str = r.class_type.parameters.__name__.replace('_', ' ')
                     output = '    {:40s}: {}'.format(title_str, str(r.value))
                 else:
-                    output = UnpackStream.param_to_str(UnpackStream.Item(r.class_type.parameters, r.value, len(r.value)), 0)
+                    output = UnpackStream.param_to_str(UnpackStream.Item(r.class_type.parameters, r.value, len(r.value), str(r.class_type.remark)), 0)
                 print(output)
                 dump.append(output)
         return dump
@@ -885,6 +885,8 @@ class PackStream:
         result = b''
         if rec is None:
             rec = self.parse_rec
+        bit_pos = 0  # only use for param with bit_width is 'a/b'
+        bit_data = b''
         for r in rec:
             if isinstance(r.value, self.Undefined) or r.value is None:
                 return None
@@ -894,7 +896,27 @@ class PackStream:
                     return None
                 result += res
             else:
-                result += r.value
+                p_class = r.class_type.parameters
+                if isinstance(p_class.__bit_width__, str) and \
+                                fullmatch(RegExp.PARAM_WIDTH_BIT, p_class.__bit_width__) is not None:  # param for length or number for length
+                    assert ('/' in p_class.__bit_width__)
+                    pos, cnt, bit_all = [int(num, 0) for num in p_class.__bit_width__.split('/')]
+                    bit_pos += cnt
+                    print(bit_pos , pos, bit_all)
+                    assert(bit_pos == bit_all - pos)
+                    p_len = bit_all // 8
+                    if len(bit_data) < p_len:
+                        bit_data = b'\x00' * p_len
+                    unsigned_pack = {1: 'B', 2: 'H', 4: 'I', 8: 'Q'}
+                    value = int.from_bytes(bit_data, 'little')
+                    value |= (int.from_bytes(r.value, 'little') & ~((-1) << cnt)) << (bit_all - bit_pos)
+                    bit_data = pack('<' + unsigned_pack[p_len], value)
+                    if bit_pos >= bit_all:
+                        result += bit_data
+                        bit_data = b''
+                else:
+                    bit_pos = 0
+                    result += r.value
         return result
 
     def to_input_arg(self, rec=None, result=None):
@@ -960,7 +982,7 @@ class PackStream:
                         title_str = self.class_type.parameters.__name__.replace('_', ' ')
                 output = '    {:40s}: {}'.format(title_str, str(self.value))
             else:
-                output = UnpackStream.param_to_str(UnpackStream.Item(self.class_type.parameters, self.value, len(self.value)), 0)
+                output = UnpackStream.param_to_str(UnpackStream.Item(self.class_type.parameters, self.value, len(self.value), str(self.class_type.remark)), 0)
             return output
 
     class Undefined:
