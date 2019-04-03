@@ -1,3 +1,4 @@
+# -*- coding: utf-8 -*-
 from struct import unpack
 
 __all__ = [
@@ -26,6 +27,8 @@ class PinYin:
             fm.close()
         if ord(ch) in PinYin.pin_dict:
             return PinYin.pin_dict[ord(ch)]
+        else:
+            return (ch, 0)
 
 if __name__ == '__main__':
     for c in '你好!':
