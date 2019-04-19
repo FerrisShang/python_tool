@@ -841,6 +841,7 @@ class PackStream:
                     print('Error: Parameter {} miss attribute __default__'.format(r.class_type.parameters.__name__))
                 else:
                     r.value = self.int2bytes(r.class_type.parameters.__default__ + sum_length, r.class_type.parameters.__bit_width__//8)
+                    sum_length += r.class_type.parameters.__bit_width__//8
             elif r.sub_format is None and not isinstance(r.value, self.Undefined):
                 sum_length += len(r.value)
 

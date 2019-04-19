@@ -152,7 +152,15 @@ class Ovpn:
         return cus_ping('8.8.8.8', c=4) < max_delay
 
 if __name__ == '__main__':
-    Ovpn(
-        getpass.getpass('Input username: '),
-        getpass.getpass('Input password: ')
-    )
+    if os.path.exists('pwdrec'):
+        f = open('pwdrec', 'r')
+        text = f.readlines()
+        f.close()
+        user = text[0].strip()
+        pwd = text[1].strip()
+        Ovpn(user, pwd)
+    else:
+        Ovpn(
+            getpass.getpass('Input username: '),
+            getpass.getpass('Input password: ')
+        )
