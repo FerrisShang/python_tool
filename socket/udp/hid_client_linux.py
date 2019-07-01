@@ -4,20 +4,20 @@ import struct
 
 
 def decode(buf):
-    return True
+    return True, True
 
 
 def run(s, keyboard_dev, mouse_dev):
     keyboard_file = open(keyboard_dev, "wb")
     mouse_file = open(mouse_dev, "wb")
     fmt = 'HHI' # 'llHHI' remove 'll
-    DATA_LEN = 10
     # cnt = 0
     while True:
         data, server_addr = s.recvfrom(1024)
+        flag, data = decode(data)
         # print(''.join('{:02X} '.format(x) for x in data), server_addr, cnt)
         # cnt += 1
-        if not (len(data) == DATA_LEN and decode(data)):
+        if not flag:
             continue
         key_event = data[2:]
         t, c, v = struct.unpack(fmt, key_event)
