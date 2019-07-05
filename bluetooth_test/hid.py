@@ -1,8 +1,10 @@
 from bt_usb import *
 from random import randint
 from crypto_toolbox import *
+from socket import *
 import re
 import signal
+from platform import system as system_name
 
 def signal_handler(sig, frame):
     pass
@@ -13,8 +15,8 @@ def bt_cmp(a, b):
 
 class Env:
     def __init__(self):
-        self.rand_addr = 'F374DEC0ADDE'
-        self.adv_type = '01'  # random
+        self.rand_addr = '782800861900'
+        self.adv_type = '00'  # random
         self.adv_name = '_'
         self.adv_intv_min = '2000'
         self.adv_intv_max = '2800'
@@ -103,6 +105,8 @@ class Env:
         self.RSP_GATT_READ_GROUP_TYPE_AGAIN = '02....090005000400011010000a'  # not found
         self.RECV_GATT_READ_INCLUDE = '02....0b0007000400080100....0228'
         self.RSP_GATT_READ_INCLUDE = '02....090005000400010801000a'  # not found
+        self.RECV_GATT_READ_SEC_SERV = '02....0b000700040010........0128'
+        self.RSP_GATT_READ_SEC_SERV = '02....090005000400011001000a'  # not found
         self.RECV_GATT_FIND_CHAR_1 = '02....0b0007000400080100..000328'
         self.RSP_GATT_FIND_CHAR_1 = '02....1b0017000400'+'0907'+'02000203004b2a'+'04001205004d2a'+'08001209004d2a'
         self.RECV_GATT_FIND_CHAR_2 = '02....0b000700040008((09)|(0a))00..000328'
@@ -135,6 +139,9 @@ class Env:
         self.RECV_GATT_WRITE_DES1 = '02....09000500040012'+'((06)|(0a))00'+'0100'
         self.RSP_GATT_WRITE_DES1_INSUFF = '0208200900050004000112080005'
         self.RSP_GATT_WRITE_DES1 = '02....05000100040013'
+        self.RECV_GATT_READ_DES1 = '02....0700030004000a0600'
+        self.RECV_GATT_READ_DES2 = '02....0700030004000a0a00'
+        self.RSP_GATT_READ_DES = '02....0700030004000b0100'
         self.SEND_GATT_KEY = '02....0f000b0004001B'+'0500'+'0000000000000000'
         self.SEND_GATT_MOUSE_MOVE = '02....0f000b0004001B'+'0900'+'000100010000'
 
@@ -165,7 +172,7 @@ class Env:
 class Hid:
     def __init__(self, param):
         self.env = param
-        self.bt = BtUsb(self.bt_cb, self.env, rec_log=False, dump_log=False)
+        self.bt = BtUsb(self.bt_cb, self.env, rec_log=True, dump_log=True)
 
     @staticmethod
     def to_string(data):
@@ -255,6 +262,8 @@ class Hid:
             self.send('02'+self.env.handle+e.RSP_GATT_READ_GROUP_TYPE_AGAIN[3*2:])
         elif bt_cmp(data, e.RECV_GATT_READ_INCLUDE):
             self.send('02'+self.env.handle+e.RSP_GATT_READ_INCLUDE[3*2:])
+        elif bt_cmp(data, e.RECV_GATT_READ_SEC_SERV):
+            self.send('02'+self.env.handle+e.RSP_GATT_READ_SEC_SERV[3*2:])
         elif bt_cmp(data, e.RECV_GATT_FIND_CHAR_1):
             self.send('02'+self.env.handle+e.RSP_GATT_FIND_CHAR_1[3*2:])
         elif bt_cmp(data, e.RECV_GATT_FIND_CHAR_2):
@@ -267,6 +276,8 @@ class Hid:
             self.send('02'+self.env.handle+e.RSP_GATT_FIND_INFO_1[3*2:])
         elif bt_cmp(data, e.RECV_GATT_FIND_INFO_2):
             self.send('02'+self.env.handle+e.RSP_GATT_FIND_INFO_2[3*2:])
+        elif bt_cmp(data, e.RECV_GATT_READ_DES1) or bt_cmp(data, e.RECV_GATT_READ_DES2):
+            self.send('02'+self.env.handle+e.RSP_GATT_READ_DES[3*2:])
         elif bt_cmp(data, e.RECV_GATT_READ_REPORT_MAP):
             self.send('02'+self.env.handle+e.RSP_GATT_READ_REPORT_MAP[3*2:] +
                       e.RSP_GATT_READ_REPORT_DATA[e.report_data_offset:e.report_data_offset+22*2])
@@ -307,7 +318,6 @@ class Hid:
     def start(self):
         self.send(self.env.CMD_RESET)
 
-import keyboard
 key_map = {
     30: 0x04,  # Keyboard a and A
     48: 0x05,  # Keyboard b and B
@@ -462,8 +472,21 @@ class keyboard_hook:
             event = keyboard_file.read(event_size)
 
 
+def keyboard_hook_win():
+    local_port = 65535
+    bufsize = 1024
+    udpServer = socket(AF_INET, SOCK_DGRAM)
+    udpServer.bind(('', local_port))
+    while True:
+        data, addr = udpServer.recvfrom(bufsize)
+        print(hid.to_string(data))
+        hid.send('02'+env.handle+env.SEND_GATT_KEY[3*2:-10*2] + hid.to_string(data))
+
+
 if __name__ == '__main__':
     env = Env()
     hid = Hid(env)
     hid.start()
+    if system_name().upper() == 'WINDOWS':
+        keyboard_hook_win()
     keyboard_hook(pressed_keys).run()
