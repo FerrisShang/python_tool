@@ -8,28 +8,43 @@ if system_name().lower() == "windows":
     OVPN1_NAME = '\\ovpn.zip'
     OVPN2_NAME = '\\ovpn (1).zip'
 else:
-    OVPN_ZIP_PATH = '/home/user/Downloads'
+    OVPN_ZIP_PATH = '.'
     OVPN1_NAME = '/ovpn.zip'
     OVPN2_NAME = '/ovpn (1).zip'
 
 OVPN_ZIP_URL = 'https://downloads.nordcdn.com/configs/archives/servers/ovpn.zip'
 
+def download(url, filename):
+    with open(filename, 'wb') as f:
+        response = requests.get(url, stream=True)
+        total = response.headers.get('content-length')
+
+        if total is None:
+            f.write(response.content)
+        else:
+            downloaded = 0
+            total = int(total)
+            for data in response.iter_content(chunk_size=max(int(total/1000), 1024*128)):
+                downloaded += len(data)
+                f.write(data)
+                print("\rDownloading: %.2f/%.2f" % (downloaded/1024/1024,total/1024/1024), end='')
+            f.close()
+    print("");
+
+
 if __name__ == '__main__':
     if not (os.path.exists(OVPN_ZIP_PATH + OVPN1_NAME) or os.path.exists(OVPN_ZIP_PATH + OVPN2_NAME)):
         print('No ovpn.zip found, just download one ...')
         print('Downloading ovpn.zip ...')
-        r = requests.get(OVPN_ZIP_URL, allow_redirects=True)
-        open(OVPN_ZIP_PATH + OVPN1_NAME, 'wb').write(r.content)
-        print('Finish downloading !')
+        download(OVPN_ZIP_URL, OVPN_ZIP_PATH + OVPN1_NAME)
     else:
-        if os.path.exists(OVPN_ZIP_PATH + OVPN2_NAME):
+        if os.path.exists(OVPN_ZIP_PATH + OVPN2_NAME) and \
+                os.stat(OVPN_ZIP_PATH + OVPN2_NAME).st_size > 10<<10:
             if os.path.exists(OVPN_ZIP_PATH + OVPN1_NAME):
                 os.remove(OVPN_ZIP_PATH + OVPN1_NAME)
             os.rename(OVPN_ZIP_PATH + OVPN2_NAME, OVPN_ZIP_PATH + OVPN1_NAME)
-        url = 'https://downloads.nordcdn.com/configs/archives/servers/ovpn.zip'
         print('Downloading ovpn.zip ...')
-        r = requests.get(OVPN_ZIP_URL, allow_redirects=True)
-        open(OVPN_ZIP_PATH + OVPN2_NAME, 'wb').write(r.content)
+        download(OVPN_ZIP_URL, OVPN_ZIP_PATH + OVPN2_NAME)
         file_list1 = []
         with ZipFile(OVPN_ZIP_PATH + OVPN1_NAME, 'r') as zf:
             for file in zf.namelist():

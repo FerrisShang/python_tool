@@ -19,7 +19,7 @@ elif system_name().lower() == "darwin":
     OVPN_OVPN_NAME = '/ovpn.zip'
     OVPN_IGNORE_FILE_PATH = '/OVPN_Ignore.list'
 else:
-    OVPN_ZIP_PATH = '/home/user/Downloads'
+    OVPN_ZIP_PATH = '.'
     OVPN_TMP_FORDER = OVPN_ZIP_PATH + '/.nord.tmp'
     OVPN_OVPN_NAME = '/ovpn.zip'
     OVPN_IGNORE_FILE_PATH = '/.OVPN_Ignore.list'
@@ -73,7 +73,14 @@ def parse_ovpn(q_ovpn, q_server):
             s_info = q_ovpn.get(True, timeout=0.3)
             assert(isinstance(s_info, ServerInfo))
             ip_str = get_ip_from_ovpn(s_info.path)
-            if ip_str is not None:
+            if ip_str is not None and \
+                    ('tw' in s_info.name or
+                     'kr' in s_info.name or
+                     'hk' in s_info.name or
+                     'us' in s_info.name or
+                     'sg' in s_info.name or
+                     'au' in s_info.name or
+                     'jp' in s_info.name):
                 s_info.ip = ip_str
                 q_server.put(s_info)
         except queue.Empty:
