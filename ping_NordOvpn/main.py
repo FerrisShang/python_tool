@@ -65,6 +65,18 @@ class ServerInfo:
         return '{:.0f} {:6s} {}'.format(self.delay, self.name.split('.')[0], self.ip)
 
 
+def copy_to_proxy(info, queue_server):
+    from copy import deepcopy
+    proxy_info = deepcopy(info)
+    assert isinstance(proxy_info.ip, str)
+    if proxy_info.ip.split('.')[-1] != '255':
+        proxy_info.name = "*" + proxy_info.name
+        ip_array = [int(n, 0) for n in proxy_info.ip.split('.')]
+        ip_array[-1] += 1
+        proxy_info.ip = '.'.join(str(n) for n in ip_array)
+        queue_server.put(proxy_info)
+
+
 def parse_ovpn(q_ovpn, q_server):
     total_num = q_ovpn.get()
     q_server.put(total_num)
@@ -73,7 +85,7 @@ def parse_ovpn(q_ovpn, q_server):
             s_info = q_ovpn.get(True, timeout=0.3)
             assert(isinstance(s_info, ServerInfo))
             ip_str = get_ip_from_ovpn(s_info.path)
-            if ip_str is not None and \
+            if ip_str is not None or \
                     ('tw' in s_info.name or
                      'kr' in s_info.name or
                      'hk' in s_info.name or
@@ -81,6 +93,7 @@ def parse_ovpn(q_ovpn, q_server):
                      'sg' in s_info.name or
                      'au' in s_info.name or
                      'jp' in s_info.name):
+
                 s_info.ip = ip_str
                 q_server.put(s_info)
         except queue.Empty:
@@ -116,7 +129,7 @@ class PingServer(Thread):
     def ping_server(self):
         while True:
             try:
-                s_info = self.q_server.get(True, timeout=0.1)
+                s_info = self.q_server.get(True, timeout=30)
                 assert(isinstance(s_info, ServerInfo))
                 if s_info.ip in self.ignore_set:
                     s_info.delay = 8888
@@ -124,6 +137,8 @@ class PingServer(Thread):
                     s_info.delay = cus_ping(s_info.ip)
                 if s_info.delay < 300:
                     self.inc_processed_num(str(s_info))
+                    if "*" not in s_info.name:
+                        copy_to_proxy(s_info, self.q_server)
                 else:
                     self.inc_processed_num(output=False)
                 self.delay_list.append((s_info.delay, s_info.name, s_info.ip, s_info.path))

@@ -1,7 +1,11 @@
 from os import system as system_call
 from platform import system as system_name
 import subprocess
-from darwin_ping import darwin_ping as ping
+try:
+    from darwin_ping import darwin_ping as ping
+except:
+    def ping(*args):
+        pass
 
 
 def cus_ping(host, c=24):
