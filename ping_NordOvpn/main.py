@@ -8,27 +8,18 @@ from zipfile import ZipFile
 from struct import pack, unpack
 from platform import system as system_name
 
-if system_name().lower() == "windows":
-    OVPN_ZIP_PATH = 'D:\\Download'
-    OVPN_TMP_FORDER = OVPN_ZIP_PATH + '\\.nord.tmp'
-    OVPN_OVPN_NAME = '\\ovpn.zip'
-    OVPN_IGNORE_FILE_PATH = '\\.OVPN_Ignore.list'
-elif system_name().lower() == "darwin":
-    OVPN_ZIP_PATH = '.'
-    OVPN_TMP_FORDER = OVPN_ZIP_PATH + '/.nord.tmp'
-    OVPN_OVPN_NAME = '/ovpn.zip'
-    OVPN_IGNORE_FILE_PATH = '/OVPN_Ignore.list'
-else:
-    OVPN_ZIP_PATH = '.'
-    OVPN_TMP_FORDER = OVPN_ZIP_PATH + '/.nord.tmp'
-    OVPN_OVPN_NAME = '/ovpn.zip'
-    OVPN_IGNORE_FILE_PATH = '/.OVPN_Ignore.list'
+OVPN_ZIP_PATH = '.'
+OVPN_TMP_FORDER = OVPN_ZIP_PATH + '/.nord.tmp'
+OVPN_OVPN_NAME = '/ovpn.zip'
+OVPN_IGNORE_FILE_PATH = '/.OVPN_Ignore.list'
 
+def p(path):
+    return os.path.relpath(path)
 
 def unzip_ovpn_zip(zip_path, tmp_folder, q_filelist = None):
     if not q_filelist:
         assert(isinstance(q_filelist, queue.Queue))
-    with ZipFile(zip_path + OVPN_OVPN_NAME, 'r') as zf:
+    with ZipFile(p(zip_path + OVPN_OVPN_NAME), 'r') as zf:
         file_list = []
         for file in zf.namelist():
             if '.tcp.ovpn' in file:
@@ -38,7 +29,7 @@ def unzip_ovpn_zip(zip_path, tmp_folder, q_filelist = None):
         for file in file_list:
             zf.extract(file, tmp_folder)
             if q_filelist:
-                q_filelist.put(ServerInfo(tmp_folder + ('\\' if system_name().lower() == "windows" else '/') + file))
+                q_filelist.put(ServerInfo(p(tmp_folder + '/' + file)))
         zf.close()
 
 
@@ -98,7 +89,7 @@ def parse_ovpn(q_ovpn, q_server):
                 q_server.put(s_info)
         except queue.Empty:
             break
-    shutil.rmtree(OVPN_TMP_FORDER)
+    shutil.rmtree(p(OVPN_TMP_FORDER))
 
 
 class PingServer(Thread):
@@ -129,13 +120,13 @@ class PingServer(Thread):
     def ping_server(self):
         while True:
             try:
-                s_info = self.q_server.get(True, timeout=30)
+                s_info = self.q_server.get(True, timeout=.30)
                 assert(isinstance(s_info, ServerInfo))
                 if s_info.ip in self.ignore_set:
                     s_info.delay = 8888
                 else:
                     s_info.delay = cus_ping(s_info.ip)
-                if s_info.delay < 300:
+                if s_info.delay < 5000:
                     self.inc_processed_num(str(s_info))
                     if "*" not in s_info.name:
                         copy_to_proxy(s_info, self.q_server)
@@ -147,7 +138,7 @@ class PingServer(Thread):
 
 
 class IgnoreSet:
-    OVPN_IGNORE_FILE = OVPN_ZIP_PATH + OVPN_IGNORE_FILE_PATH
+    OVPN_IGNORE_FILE = p(OVPN_ZIP_PATH + OVPN_IGNORE_FILE_PATH)
 
     @staticmethod
     def get():
@@ -178,7 +169,7 @@ if __name__ == '__main__':
     delay_list = []
     q_file = queue.Queue()
     q_server_info = queue.Queue()
-    unzip_ovpn_zip(OVPN_ZIP_PATH, OVPN_TMP_FORDER, q_file)
+    unzip_ovpn_zip(OVPN_ZIP_PATH, p(OVPN_TMP_FORDER), q_file)
     parse_ovpn(q_file, q_server_info)
     PingServer(q_server_info, delay_list, IgnoreSet().get())
     print('================================')
